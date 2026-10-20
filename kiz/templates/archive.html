@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Архив{% endblock %}
+{% block content %}
+<h1>Архив напечатанных</h1>
+<form method="get" action="/archive" class="search">
+  <input name="code" value="{{ code }}" placeholder="Отсканируйте DataMatrix с этикетки или введите часть кода" autocomplete="off" data-select {% if not q %}autofocus{% endif %}>
+  <button class="primary">Найти код</button>
+</form>
+<form method="get" action="/archive" class="filters">
+  <input name="q" value="{{ q }}" placeholder="Артикул, размер или баркод">
+  <select name="user_id"><option value="">Все сотрудники</option>
+    {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if u.id == user_id }}>{{ u.name }}</option>{% endfor %}
+  </select>
+  <label>с <input type="date" name="date_from" value="{{ date_from }}"></label>
+  <label>по <input type="date" name="date_to" value="{{ date_to }}"></label>
+  <button>Показать</button>
+</form>
+{% if found_codes is not none %}
+  {% if found_codes %}
+  <table class="list">
+    <thead><tr><th>Код</th><th>Товар</th><th>Статус</th><th></th></tr></thead>
+    <tbody>
+    {% for c in found_codes %}
+    <tr><td class="mono">{{ c.code_prefix }}</td><td>{{ c.article }} р. {{ c.size }}</td>
+      <td>{% if c.status == 'printed' %}напечатан {{ c.printed_at|local }}{% if c.reprint_count %}, перепечатан {{ c.reprint_count }} раз{% endif %}{% else %}ещё в остатке{% endif %}</td>
+      <td>{% if c.print_job_id %}<a href="/archive/job/{{ c.print_job_id }}?highlight={{ c.id }}">открыть</a>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Код не найден.</p>{% endif %}
+{% else %}
+<table class="list">
+  <thead><tr><th>№</th><th>Когда</th><th>Кто</th><th>Товар</th><th>Действие</th><th class="num">Шт.</th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+  <tr class="rowlink" data-href="/archive/job/{{ j.id }}"><td><a href="/archive/job/{{ j.id }}">{{ j.id }}</a></td><td>{{ j.created_at|local }}</td><td>{{ j.user_name }}</td>
+    <td>{{ j.article or 'Разные товары' }} {% if j.size %}р. {{ j.size }}{% endif %}</td>
+    <td>{{ 'Печать' if j.kind == 'print' else 'Повторная' }}</td><td class="num">{{ j.qty }}</td></tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">Ничего не найдено</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

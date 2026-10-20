@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники{% endblock %}
+{% block content %}
+<h1>Сотрудники</h1>
+{% if new_code %}
+<div class="card highlight">
+  <h2>Личный код для «{{ new_code.name }}»: <span class="mono big">{{ new_code.code }}</span></h2>
+  <p>Код показывается один раз. Напечатайте бейдж на TSC и отдайте сотруднику.</p>
+  <div class="actions">
+    <a href="/users/badge.pdf" target="_blank" class="btn primary">Открыть бейдж для печати</a>
+    <form method="post" action="/users/badge/done"><button>Готово, скрыть код</button></form>
+  </div>
+</div>
+{% endif %}
+<table class="list">
+  <thead><tr><th>Имя</th><th>Роль</th><th>Логин</th><th>Перепечатка</th><th>Состояние</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+  <tr class="{{ 'muted' if not u.active }}">
+    <td>{{ u.name }}</td><td>{{ role_names[u.role] }}</td><td>{{ u.login or '' }}</td>
+    <td>{% if u.role != 'station' %}
+      <form method="post" action="/users/{{ u.id }}/toggle" class="inline"><input type="hidden" name="field" value="can_reprint">
+        <button class="link">{{ 'разрешена' if u.can_reprint else 'запрещена' }}</button></form>{% endif %}</td>
+    <td><form method="post" action="/users/{{ u.id }}/toggle" class="inline"><input type="hidden" name="field" value="active">
+        <button class="link">{{ 'работает' if u.active else 'отключён' }}</button></form></td>
+    <td class="row-actions">
+      {% if u.role != 'station' %}
+      <form method="post" action="/users/{{ u.id }}/code" class="inline" data-confirm="Выдать новый личный код? Старый бейдж перестанет работать."><button class="link">новый код</button></form>
+      {% endif %}
+      {% if u.login %}
+      <details class="inline"><summary>пароль</summary>
+        <form method="post" action="/users/{{ u.id }}/password"><input name="password" type="password" minlength="8" required placeholder="новый пароль"><button>Сменить</button></form>
+      </details>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<form method="post" action="/users" class="card">
+  <h2>Добавить</h2>
+  <label>Имя <input name="name" required></label>
+  <label>Роль
+    <select name="role" id="role">
+      <option value="packer">Упаковщик (только личный код)</option>
+      <option value="operator">Оператор (загрузка, остатки, журнал)</option>
+      <option value="station">Компьютер упаковки (общий вход)</option>
+      <option value="admin">Администратор</option>
+    </select>
+  </label>
+  <div id="login-fields">
+    <label>Логин <input name="login" autocomplete="off"></label>
+    <label>Пароль (не короче 8 символов) <input name="password" type="password" autocomplete="new-password"></label>
+  </div>
+  <button class="primary">Добавить</button>
+</form>
+{% endblock %}
+{% block scripts %}<script>toggleLoginFields();</script>{% endblock %}

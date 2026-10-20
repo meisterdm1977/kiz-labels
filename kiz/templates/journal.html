@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Журнал{% endblock %}
+{% block content %}
+<h1>Журнал</h1>
+<form method="get" action="/journal" class="filters" id="jf">
+  <input name="q" value="{{ q }}" placeholder="Артикул, размер или баркод">
+  <select name="user_id"><option value="">Все сотрудники</option>
+    {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if u.id == user_id }}>{{ u.name }}</option>{% endfor %}
+  </select>
+  <select name="kind">
+    <option value="">Все действия</option>
+    <option value="print" {{ 'selected' if kind == 'print' }}>Печать</option>
+    <option value="reprint" {{ 'selected' if kind == 'reprint' }}>Повторная печать</option>
+  </select>
+  <label>с <input type="date" name="date_from" value="{{ date_from }}"></label>
+  <label>по <input type="date" name="date_to" value="{{ date_to }}"></label>
+  <button>Показать</button>
+  <button formaction="/journal.xlsx">Скачать Excel</button>
+</form>
+<p>Напечатано: <b>{{ total_printed }}</b> шт. Перепечатано: <b>{{ total_reprinted }}</b> шт.</p>
+<table class="list">
+  <thead><tr><th>Когда</th><th>Действие</th><th>Кто</th><th>Что</th><th class="num">Шт.</th></tr></thead>
+  <tbody>
+  {% for e in entries %}{% set r = e.row %}
+  <tr>
+    <td>{{ e.at|local }}</td>
+    {% if e.type == 'upload' %}
+      <td>Загрузка</td><td>{{ r.user_name or '' }}</td><td><a href="/uploads/{{ r.id }}">{{ r.filename }}</a></td>
+      <td class="num">{{ r.summary.added if r.status == 'added' else '' }}</td>
+    {% else %}
+      <td>{{ 'Печать' if e.type == 'print' else 'Повторная печать' }}</td><td>{{ r.user_name }}</td>
+      <td><a href="/archive/job/{{ r.id }}">{{ r.article or 'Разные товары' }} {% if r.size %}р. {{ r.size }}{% endif %}</a></td>
+      <td class="num">{{ r.qty }}</td>
+    {% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Записей нет</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

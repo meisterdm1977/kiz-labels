@@ -1,0 +1,14 @@
+fastapi==0.156.1
+uvicorn==0.54.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+Jinja2==3.1.6
+python-multipart==0.0.32
+itsdangerous==2.2.0
+openpyxl==3.1.5
+pillow==12.3.0
+pylibdmtx==0.1.10
+# pylibdmtx still imports distutils, which Python 3.12 ships only through setuptools.
+setuptools==68.1.2
+pypdf==6.17.0
+reportlab==5.0.1

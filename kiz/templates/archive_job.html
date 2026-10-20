@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Архив: печать №{{ job.id }}{% endblock %}
+{% block content %}
+<p><a href="/archive">← В архив</a></p>
+<div class="card">
+  <h1>{{ 'Печать' if job.kind == 'print' else 'Повторная печать' }} №{{ job.id }}</h1>
+  <p>{{ job.article or 'Разные товары' }} {% if job.size %}р. {{ job.size }}{% endif %} · {{ job.qty }} шт. · {{ job.user_name }} · {{ job.created_at|local }}</p>
+</div>
+<form method="post" action="/reprint" class="card" data-once>
+  <input type="hidden" name="job_id" value="{{ job.id }}">
+  <table class="list">
+    <thead><tr><th><input type="checkbox" data-check-all title="Выбрать все"></th><th>№</th><th>Код</th><th>Товар</th><th>Перепечаток</th></tr></thead>
+    <tbody>
+    {% for c in codes %}
+    <tr class="{{ 'hl' if c.id == highlight }}">
+      <td><input type="checkbox" name="code_id" value="{{ c.id }}" {{ 'checked' if c.id == highlight }}></td>
+      <td>{{ c.position + 1 }}</td><td class="mono">{{ c.code_prefix }}</td>
+      <td>{{ c.article }} р. {{ c.size }}</td><td>{{ c.reprint_count or '' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <label>Личный код (отсканируйте бейдж)
+    <input name="personal_code" type="password" required autocomplete="off">
+  </label>
+  <button class="primary big">Перепечатать выбранные</button>
+  <p class="muted">Повторная печать записывается в журнал вместе с вашим именем.</p>
+</form>
+{% endblock %}

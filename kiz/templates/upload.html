@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Загрузка №{{ upload.id }}{% endblock %}
+{% block content %}
+<p><a href="/uploads">← К загрузкам</a></p>
+{% set u = upload %}
+<div class="card">
+  <h1>Загрузка №{{ u.id }} {% include "_upload_status.html" %}</h1>
+  <p>{{ u.filename }} · {{ u.user_name or '' }} · {{ u.created_at|local }}</p>
+  {% if u.status == 'processing' %}
+    <p>Файл обрабатывается: читаем коды и готовим этикетки. Обычно до минуты на 300 этикеток. Страница обновится сама.</p>
+  {% elif u.status == 'failed' %}
+    <p class="flash error">{{ u.error }}</p>
+  {% endif %}
+  {% if u.summary %}
+    {% set s = u.summary %}
+    <p>Этикеток в файле: <b>{{ s.total }}</b>. Новых: <b>{{ s.new }}</b>{% if s.duplicates %}, уже есть в хранилище или повторяются: <b>{{ s.duplicates }}</b>{% endif %}{% if s.errors %}, с ошибками: <b class="bad">{{ s.errors }}</b>{% endif %}.</p>
+    <table class="list">
+      <thead><tr><th>Артикул</th><th>Размер</th><th>Цвет</th><th>EAN</th><th class="num">Новых</th><th class="num">Повторов</th><th class="num">Ошибок</th></tr></thead>
+      <tbody>
+      {% for g in s.groups %}
+      <tr><td>{{ g.article }}</td><td>{{ g.size }}</td><td>{{ g.color }}</td><td>{{ g.ean }}</td>
+        <td class="num">{{ g.new }}</td><td class="num">{{ g.duplicates }}</td><td class="num">{{ g.errors }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if s.error_list %}
+    <h2>Этикетки с ошибками (в хранилище не попадут)</h2>
+    <ul>{% for e in s.error_list %}<li>Этикетка {{ e.index }}: {{ e.text }}</li>{% endfor %}</ul>
+    {% endif %}
+  {% endif %}
+  {% if u.status == 'ready' %}
+  <div class="actions">
+    <form method="post" action="/uploads/{{ u.id }}/confirm" data-once><button class="primary big" {{ 'disabled' if not u.summary.new }}>Добавить {{ u.summary.new }} шт. в хранилище</button></form>
+    <form method="post" action="/uploads/{{ u.id }}/cancel"><button>Отменить</button></form>
+  </div>
+  {% elif u.status == 'failed' %}
+  <form method="post" action="/uploads/{{ u.id }}/cancel"><button>Убрать из списка</button></form>
+  {% endif %}
+</div>
+{% if u.status == 'processing' %}<script>setTimeout(() => location.reload(), 3000)</script>{% endif %}
+{% endblock %}

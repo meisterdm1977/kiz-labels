@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Загрузка кодов{% endblock %}
+{% block content %}
+<h1>Загрузка кодов</h1>
+<form method="post" action="/uploads" enctype="multipart/form-data" class="card" data-once>
+  <label>Файлы этикеток из 1С (.xlsx), можно несколько
+    <input type="file" name="files" accept=".xlsx" multiple required>
+  </label>
+  <button class="primary">Загрузить</button>
+  <p class="muted">Сервис прочитает каждую этикетку и покажет итог. Коды попадут в хранилище только после кнопки «Добавить».</p>
+</form>
+<h2>Последние загрузки</h2>
+<table class="list">
+  <thead><tr><th>№</th><th>Когда</th><th>Кто</th><th>Файл</th><th>Состояние</th></tr></thead>
+  <tbody>
+  {% for u in uploads %}
+  <tr class="rowlink" data-href="/uploads/{{ u.id }}"><td><a href="/uploads/{{ u.id }}">{{ u.id }}</a></td><td>{{ u.created_at|local }}</td><td>{{ u.user_name or '' }}</td>
+    <td>{{ u.filename }}</td>
+    <td>{% include "_upload_status.html" %}</td></tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Загрузок пока нет</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if uploads|selectattr('status', 'equalto', 'processing')|list %}<script>setTimeout(() => location.reload(), 5000)</script>{% endif %}
+{% endblock %}

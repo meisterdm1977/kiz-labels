@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ product.article }} {{ product.size }}{% endblock %}
+{% block content %}
+<p><a href="/pack">← К поиску</a></p>
+<div class="card">
+  <h1>{{ product.article }} <span class="muted">р. {{ product.size }}</span></h1>
+  <p>{{ product.color }} · EAN {{ product.ean }}</p>
+  <p class="stock">В остатке: <b>{{ product.stock }}</b> шт.</p>
+</div>
+{% if product.stock > 0 %}
+<form method="post" action="/print" class="card print-form" data-once>
+  <input type="hidden" name="product_id" value="{{ product.id }}">
+  <label>Сколько напечатать
+    <input name="qty" type="number" min="1" max="{{ product.stock }}" required autofocus inputmode="numeric">
+  </label>
+  <label>Личный код (отсканируйте бейдж)
+    <input name="personal_code" type="password" required autocomplete="off">
+  </label>
+  <button class="primary big">Печать</button>
+  <p class="muted">После нажатия коды сразу уходят в архив. Если печать не пройдёт, перепечатайте их из архива по личному коду.</p>
+</form>
+{% else %}
+<div class="flash error">Коды этого товара закончились. Сообщите оператору.</div>
+{% endif %}
+{% if last_jobs %}
+<h2>Последние печати</h2>
+<table class="list">
+  <thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th class="num">Шт.</th><th></th></tr></thead>
+  <tbody>
+  {% for j in last_jobs %}
+  <tr><td>{{ j.created_at|local }}</td><td>{{ j.user_name }}</td>
+      <td>{{ 'Печать' if j.kind == 'print' else 'Повторная' }}</td><td class="num">{{ j.qty }}</td>
+      <td><a href="/archive/job/{{ j.id }}">в архиве</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

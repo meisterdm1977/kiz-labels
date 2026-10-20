@@ -1,0 +1,5 @@
+{%- if u.status == 'processing' -%}<span class="tag">обрабатывается…</span>
+{%- elif u.status == 'ready' -%}<span class="tag warn">ждёт подтверждения</span>
+{%- elif u.status == 'added' -%}<span class="tag ok">добавлено {{ u.summary.added }} шт.</span>
+{%- elif u.status == 'failed' -%}<span class="tag bad">ошибка</span>
+{%- else -%}<span class="tag">отменено</span>{%- endif -%}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Этикетки ЧЗ{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+{% if user %}
+<header class="top">
+  <nav>
+    <a href="/pack" class="brand">Этикетки ЧЗ</a>
+    <a href="/pack">Печать</a>
+    <a href="/archive">Архив</a>
+    {% if user.role in ('admin', 'operator') %}
+    <a href="/uploads">Загрузка</a>
+    <a href="/stock">Остатки</a>
+    <a href="/journal">Журнал</a>
+    {% endif %}
+    {% if user.role == 'admin' %}<a href="/users">Сотрудники</a>{% endif %}
+  </nav>
+  <form method="post" action="/logout" class="who">
+    <span>{{ user.name }}</span>
+    <button class="link">Выйти</button>
+  </form>
+</header>
+{% endif %}
+<main>
+{% if flash %}<div class="flash {{ 'error' if flash.error }}">{{ flash.text }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,51 @@
+:root { --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+        --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --hl: #fff8c5; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+a { color: var(--accent); }
+main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 24px; margin: 8px 0 12px; } h2 { font-size: 19px; margin: 20px 0 10px; }
+.top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+       background: #1d2330; color: #fff; padding: 8px 16px; }
+.top nav { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.top a { color: #dbe3f0; text-decoration: none; } .top a:hover { color: #fff; }
+.top .brand { font-weight: 700; color: #fff; }
+.who { display: flex; gap: 10px; align-items: center; }
+.who .link { color: #dbe3f0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 12px 0; }
+.card.narrow { max-width: 380px; margin: 60px auto; }
+.card.highlight { border-color: var(--accent); }
+label { display: block; margin: 10px 0; }
+input, select, button, .btn { font: inherit; }
+input:not([type=checkbox]), select { display: block; width: 100%; max-width: 480px; padding: 9px 10px; border: 1px solid #c9ced6; border-radius: 6px; margin-top: 4px; background: #fff; }
+input.short { display: inline-block; width: 90px; }
+button, .btn { display: inline-block; padding: 9px 16px; border-radius: 6px; border: 1px solid #c9ced6; background: #fff; cursor: pointer; text-decoration: none; color: var(--text); }
+button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.big { font-size: 20px; padding: 14px 28px; }
+button:disabled { opacity: .5; cursor: default; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+.search { display: flex; gap: 8px; margin: 8px 0 16px; }
+.search input { max-width: none; font-size: 20px; margin: 0; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0 16px; }
+.filters input, .filters select { width: auto; margin: 0; }
+.filters label { margin: 0; display: flex; gap: 6px; align-items: center; }
+table.list { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.list th, .list td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.list th { background: #fafbfc; font-weight: 600; font-size: 14px; color: var(--muted); }
+.list .num { text-align: right; white-space: nowrap; }
+.rowlink { cursor: pointer; } .rowlink:hover { background: #f0f5ff; }
+tr.hl { background: var(--hl); } tr.low td { color: var(--bad); }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 14px; word-break: break-all; }
+.mono.big { font-size: 26px; }
+.muted { color: var(--muted); } .bad { color: var(--bad); }
+.stock { font-size: 20px; }
+.flash { padding: 10px 14px; border-radius: 8px; background: #dafbe1; border: 1px solid #aceebb; margin: 10px 0; }
+.flash.error { background: #ffebe9; border-color: #ffcecb; }
+.tag { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 10px; background: #eef1f4; vertical-align: middle; }
+.tag.ok { background: #dafbe1; color: var(--ok); } .tag.warn { background: #fff8c5; color: var(--warn); } .tag.bad { background: #ffebe9; color: var(--bad); }
+.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+form.inline, details.inline { display: inline; }
+.row-actions { white-space: nowrap; } .row-actions > * { margin-right: 10px; }
+details form { display: flex; gap: 6px; margin-top: 6px; } details input { margin: 0; }
+iframe.pdf { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+@media (max-width: 640px) { .search { flex-direction: column; } .list { font-size: 14px; } }

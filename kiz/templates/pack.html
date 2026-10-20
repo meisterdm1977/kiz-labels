@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Печать{% endblock %}
+{% block content %}
+<form method="get" action="/pack" class="search">
+  <input name="q" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" autofocus autocomplete="off" data-select>
+  <button class="primary">Найти</button>
+</form>
+{% if q %}
+  {% if products %}
+  <table class="list">
+    <thead><tr><th>Артикул</th><th>Размер</th><th>Цвет</th><th>EAN</th><th class="num">Остаток</th></tr></thead>
+    <tbody>
+    {% for p in products %}
+      <tr class="rowlink" data-href="/pack/product/{{ p.id }}">
+        <td><a href="/pack/product/{{ p.id }}">{{ p.article }}</a></td><td>{{ p.size }}</td><td>{{ p.color }}</td>
+        <td>{{ p.ean }}</td><td class="num">{{ p.stock }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Ничего не найдено по запросу «{{ q }}».</p>
+  {% endif %}
+{% else %}
+<p class="muted">Введите артикул с размером, например «Шорты 02 коричневый 40», или отсканируйте баркод товара.</p>
+{% endif %}
+{% endblock %}

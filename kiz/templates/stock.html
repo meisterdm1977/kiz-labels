@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Остатки{% endblock %}
+{% block content %}
+<h1>Остатки кодов</h1>
+<form method="get" action="/stock" class="filters">
+  <input name="q" value="{{ q }}" placeholder="Артикул, размер или баркод">
+  <label><input type="checkbox" name="low" value="1" {{ 'checked' if low }}> только меньше {{ threshold }} шт.</label>
+  <button>Показать</button>
+  <a href="/stock.xlsx" class="btn">Скачать Excel</a>
+</form>
+{% if low_count and not low %}<p class="flash error">Заканчиваются коды у {{ low_count }} товаров (меньше {{ threshold }} шт.). <a href="/stock?low=1">Показать</a></p>{% endif %}
+<table class="list">
+  <thead><tr><th>Артикул</th><th>Размер</th><th>Цвет</th><th>EAN</th><th class="num">В остатке</th><th class="num">В архиве</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr class="{{ 'low' if r.stock < threshold }}"><td>{{ r.article }}</td><td>{{ r.size }}</td><td>{{ r.color }}</td><td>{{ r.ean }}</td>
+    <td class="num">{{ r.stock }}</td><td class="num">{{ r.printed }}</td></tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">Товаров пока нет. Загрузите первый файл в разделе «Загрузка».</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/stock/threshold" class="filters">
+  <label>Предупреждать, когда остаток меньше <input name="value" type="number" min="0" value="{{ threshold }}" class="short"> шт.</label>
+  <button>Сохранить</button>
+</form>
+{% endblock %}
