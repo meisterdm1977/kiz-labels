@@ -179,3 +179,36 @@ def test_password_guessing_is_blocked():
     assert "/login" in r.headers["location"]
     auth.login_throttle.failures.clear()
     login(c)
+
+
+def test_own_and_imported_personal_codes(client, tmp_path):
+    import openpyxl
+    login(client)
+    client.post("/users", data={"name": "Олег", "role": "packer", "personal_code": "0042-77"})
+    with db.pool.connection() as conn:
+        from kiz import auth
+        assert auth.user_by_code(conn, "0042-77")["name"] == "Олег"
+
+    # The same code twice is refused.
+    page = client.post("/users", data={"name": "Иван", "role": "packer", "personal_code": "0042-77"}).text
+    assert "уже есть у другого сотрудника" in page
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["ФИО", "Код"])
+    ws.append(["Мария", "00123"])
+    ws.append(["Пётр", 98765])
+    ws.append(["Дубль", "0042-77"])
+    path = tmp_path / "people.xlsx"
+    wb.save(path)
+    page = client.post("/users/import", files={"file": ("people.xlsx", path.read_bytes())}).text
+    assert "Добавлено упаковщиков: 2" in page and "Олег" in page
+    with db.pool.connection() as conn:
+        assert auth.user_by_code(conn, "00123")["name"] == "Мария"
+        assert auth.user_by_code(conn, "98765")["name"] == "Пётр"
+
+        petr_id = auth.user_by_code(conn, "98765")["id"]
+    client.post(f"/users/{petr_id}/code", data={"personal_code": "5555"})
+    with db.pool.connection() as conn:
+        assert auth.user_by_code(conn, "98765") is None
+        assert auth.user_by_code(conn, "5555")["name"] == "Пётр"

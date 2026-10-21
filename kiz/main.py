@@ -442,17 +442,30 @@ def users_page(request: Request):
     return render(request, "users.html", user, users=users, new_code=new_code)
 
 
+def _valid_code(code):
+    return len(auth.normalize_code(code)) >= 4
+
+
+def _unique_error(e):
+    constraint = getattr(e.diag, "constraint_name", "") or ""
+    return "Такой личный код уже есть у другого сотрудника" if "code" in constraint else "Такой логин уже есть"
+
+
 @app.post("/users")
 def create_user(request: Request, name: str = Form(...), role: str = Form(...),
-                login: str = Form(""), password: str = Form("")):
+                login: str = Form(""), password: str = Form(""), personal_code: str = Form("")):
     require(request, "admin")
-    name, login = name.strip(), login.strip()
+    name, login, personal_code = name.strip(), login.strip(), personal_code.strip()
     if role not in auth.ROLE_NAMES or not name:
         return redirect("/users", request, "Укажите имя и роль", error=True)
     needs_login = role in ("admin", "operator", "station")
     if needs_login and (not login or len(password) < 8):
         return redirect("/users", request, "Для этой роли нужен логин и пароль не короче 8 символов", error=True)
-    code = auth.new_personal_code() if role != "station" else None
+    if personal_code and not _valid_code(personal_code):
+        return redirect("/users", request, "Личный код должен быть не короче 4 символов", error=True)
+    code = None
+    if role != "station":
+        code = personal_code or auth.new_personal_code()
     try:
         with db.tx() as conn:
             user_id = conn.execute(
@@ -460,26 +473,95 @@ def create_user(request: Request, name: str = Form(...), role: str = Form(...),
                 (name, role, login or None, auth.hash_password(password) if needs_login else None,
                  auth.hash_code(code) if code else None),
             ).fetchone()["id"]
-    except UniqueViolation:
-        return redirect("/users", request, "Такой логин уже есть", error=True)
-    if code:
+    except UniqueViolation as e:
+        return redirect("/users", request, _unique_error(e), error=True)
+    if code and not personal_code:
         request.session["new_code"] = {"user_id": user_id, "name": name, "code": code}
     return redirect("/users", request, f"Сотрудник «{name}» добавлен")
 
 
 @app.post("/users/{user_id}/code")
-def reset_code(request: Request, user_id: int):
+def reset_code(request: Request, user_id: int, personal_code: str = Form("")):
     require(request, "admin")
-    code = auth.new_personal_code()
-    with db.tx() as conn:
-        row = conn.execute(
-            "UPDATE users SET code_hash = %s WHERE id = %s AND role <> 'station' RETURNING name",
-            (auth.hash_code(code), user_id),
-        ).fetchone()
+    personal_code = personal_code.strip()
+    if personal_code and not _valid_code(personal_code):
+        return redirect("/users", request, "Личный код должен быть не короче 4 символов", error=True)
+    code = personal_code or auth.new_personal_code()
+    try:
+        with db.tx() as conn:
+            row = conn.execute(
+                "UPDATE users SET code_hash = %s WHERE id = %s AND role <> 'station' RETURNING name",
+                (auth.hash_code(code), user_id),
+            ).fetchone()
+    except UniqueViolation as e:
+        return redirect("/users", request, _unique_error(e), error=True)
     if not row:
         return redirect("/users", request, "Сотрудник не найден", error=True)
+    if personal_code:
+        return redirect("/users", request, f"Код для «{row['name']}» изменён, старый больше не действует")
     request.session["new_code"] = {"user_id": user_id, "name": row["name"], "code": code}
     return redirect("/users", request, "Выдан новый личный код, старый больше не действует")
+
+
+def _cell_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value).strip()
+
+
+def _read_people(filename, content):
+    """Rows of (name, code) from an Excel or CSV file; a header row with «Имя»/«Код» is optional."""
+    if filename.lower().endswith(".csv"):
+        import csv
+        text = content.decode("utf-8-sig", errors="replace")
+        dialect = csv.Sniffer().sniff(text[:2000], delimiters=";,\t") if text.strip() else csv.excel
+        rows = [list(r) for r in csv.reader(io.StringIO(text), dialect)]
+    else:
+        ws = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True).worksheets[0]
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    rows = [[_cell_text(v) for v in r] for r in rows if any(_cell_text(v) for v in r)]
+    name_col, code_col = 0, 1
+    if rows:
+        header = [h.lower() for h in rows[0]]
+        names = [i for i, h in enumerate(header) if "имя" in h or "фио" in h or "сотрудник" in h]
+        codes = [i for i, h in enumerate(header) if "код" in h]
+        if names or codes:
+            name_col = names[0] if names else 0
+            code_col = codes[0] if codes else 1
+            rows = rows[1:]
+    return [(r[name_col] if name_col < len(r) else "", r[code_col] if code_col < len(r) else "") for r in rows]
+
+
+@app.post("/users/import")
+async def import_users(request: Request, file: UploadFile = File(...)):
+    require(request, "admin")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".csv")):
+        return redirect("/users", request, "Нужен файл Excel (.xlsx) или CSV", error=True)
+    try:
+        people = _read_people(file.filename, await file.read())
+    except Exception:
+        return redirect("/users", request, "Не удалось прочитать файл", error=True)
+    added, problems = 0, []
+    with db.tx() as conn:
+        for line, (name, code) in enumerate(people, start=1):
+            if not name or not _valid_code(code):
+                problems.append(f"строка {line}: нет имени или код короче 4 символов")
+                continue
+            exists = conn.execute("SELECT name FROM users WHERE code_hash = %s", (auth.hash_code(code),)).fetchone()
+            if exists:
+                problems.append(f"{name}: этот код уже есть у «{exists['name']}»")
+                continue
+            conn.execute(
+                "INSERT INTO users (name, role, code_hash) VALUES (%s, 'packer', %s)",
+                (name, auth.hash_code(code)),
+            )
+            added += 1
+    message = f"Добавлено упаковщиков: {added}."
+    if problems:
+        message += " Пропущено: " + "; ".join(problems[:10]) + ("…" if len(problems) > 10 else "")
+    return redirect("/users", request, message, error=bool(problems))
 
 
 @app.post("/users/{user_id}/toggle")

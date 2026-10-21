@@ -25,7 +25,12 @@
         <button class="link">{{ 'работает' if u.active else 'отключён' }}</button></form></td>
     <td class="row-actions">
       {% if u.role != 'station' %}
-      <form method="post" action="/users/{{ u.id }}/code" class="inline" data-confirm="Выдать новый личный код? Старый бейдж перестанет работать."><button class="link">новый код</button></form>
+      <details class="inline"><summary>сменить код</summary>
+        <form method="post" action="/users/{{ u.id }}/code" data-confirm="Сменить личный код? Старый перестанет работать.">
+          <input name="personal_code" autocomplete="off" placeholder="свой код или пусто для нового">
+          <button>Сменить</button>
+        </form>
+      </details>
       {% endif %}
       {% if u.login %}
       <details class="inline"><summary>пароль</summary>
@@ -49,11 +54,22 @@
       <option value="admin">Администратор</option>
     </select>
   </label>
+  <label id="code-field">Личный код (если пусто, сервис придумает сам)
+    <input name="personal_code" autocomplete="off" placeholder="например, код с текущего бейджа">
+  </label>
   <div id="login-fields">
     <label>Логин <input name="login" autocomplete="off"></label>
     <label>Пароль (не короче 8 символов) <input name="password" type="password" autocomplete="new-password"></label>
   </div>
   <button class="primary">Добавить</button>
+</form>
+
+<form method="post" action="/users/import" enctype="multipart/form-data" class="card">
+  <h2>Загрузить упаковщиков списком</h2>
+  <p class="muted">Файл Excel или CSV: в первом столбце имя, во втором личный код (можно с заголовками «Имя» и «Код»).
+    Чтобы коды с нулём в начале не потеряли ноль, сделайте столбец с кодами текстовым.</p>
+  <input type="file" name="file" accept=".xlsx,.csv" required>
+  <button class="primary">Загрузить</button>
 </form>
 {% endblock %}
 {% block scripts %}<script>toggleLoginFields();</script>{% endblock %}

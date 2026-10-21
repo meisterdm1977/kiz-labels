@@ -42,7 +42,11 @@ function setupPrint() {
 function toggleLoginFields() {
   const role = document.getElementById("role");
   const fields = document.getElementById("login-fields");
-  const update = () => { fields.style.display = role.value === "packer" ? "none" : ""; };
+  const code = document.getElementById("code-field");
+  const update = () => {
+    fields.style.display = role.value === "packer" ? "none" : "";
+    code.style.display = role.value === "station" ? "none" : "";
+  };
   role.addEventListener("change", update);
   update();
 }
