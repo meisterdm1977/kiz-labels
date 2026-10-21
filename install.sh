@@ -68,6 +68,15 @@ EOF
   chmod 600 .env
 fi
 
+for port in 80 443; do
+  if ss -ltnpH "sport = :$port" | grep -v -q docker-proxy && ss -ltnH "sport = :$port" | grep -q .; then
+    echo "Порт $port уже занят другой программой:" >&2
+    ss -ltnpH "sport = :$port" >&2
+    echo "Сервису нужны порты 80 и 443. Остановите эту программу (например, веб-сервер панели) и запустите установку снова." >&2
+    exit 1
+  fi
+done
+
 echo "== Собираю и запускаю (первый раз это занимает несколько минут)"
 docker compose up -d --build
 
