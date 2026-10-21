@@ -20,28 +20,21 @@
    с IP-адресом сервера. Домен нужен для защищённого соединения (https), сертификат выпустится сам.
 
 ### Установка (один раз)
-Подключитесь к серверу по SSH (хостинг показывает команду и пароль) и выполните по очереди:
+Подключитесь к серверу по SSH (на Mac: программа «Терминал», команда `ssh root@IP-адрес-сервера`,
+пароль хостинг присылает на почту) и вставьте одну команду:
 
 ```sh
-curl -fsSL https://get.docker.com | sh
-git clone <адрес репозитория> kiz
-cd kiz
-cp .env.example .env
-nano .env
+curl -fsSL https://raw.githubusercontent.com/meisterdm1977/kiz-labels/main/install.sh | bash
 ```
 
-В файле `.env` заполните:
-- `DOMAIN` — ваш домен;
-- `DB_PASSWORD` и `SECRET_KEY` — длинные случайные строки. Получить можно командой `openssl rand -hex 32`;
-- `ADMIN_PASSWORD` — пароль первого входа администратора.
+Скрипт сам поставит Docker, скачает сервис, придумает пароли и запустит всё. В конце он покажет адрес сайта,
+логин и пароль администратора. Без своего домена адрес будет вида `https://1.2.3.4.sslip.io`.
 
-Сохраните (Ctrl+O, Enter, Ctrl+X) и запустите:
-
+Со своим доменом (запись A домена должна указывать на IP сервера):
 ```sh
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/meisterdm1977/kiz-labels/main/install.sh | DOMAIN=kiz.example.ru bash
 ```
-
-Через пару минут сайт откроется по адресу `https://ваш-домен`.
+Сменить домен позже: исправьте `DOMAIN` в `/opt/kiz/.env` и выполните `cd /opt/kiz && docker compose up -d`.
 
 ### Резервные копии
 ```sh
@@ -49,13 +42,13 @@ crontab -e
 ```
 Добавьте строку (копия каждую ночь в 3:00, хранятся 14 дней в папке `backups`):
 ```
-0 3 * * * /root/kiz/backup.sh
+0 3 * * * /opt/kiz/backup.sh
 ```
 Лучше раз в неделю скачивать папку `backups` к себе или подключить облачное хранилище хостинга.
 
 ### Обновление
 ```sh
-cd kiz && git pull && docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/meisterdm1977/kiz-labels/main/install.sh | bash
 ```
 
 ## Первая настройка

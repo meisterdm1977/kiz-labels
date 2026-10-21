@@ -164,3 +164,18 @@ def test_parallel_printing_never_shares_codes(client, tmp_path):
     assert len(ids) == len(set(ids)) == 3 * len(results)
     assert len(results) == 6 and len(errors) == 2
     assert stock_of("2047000000001") == 2
+
+
+def test_password_guessing_is_blocked():
+    from fastapi.testclient import TestClient
+    from kiz import auth
+    from kiz.main import app
+
+    auth.login_throttle.failures.clear()
+    c = TestClient(app)
+    for _ in range(10):
+        c.post("/login", data={"login": "admin", "password": "wrong"})
+    r = c.post("/login", data={"login": "admin", "password": "admin-password"}, follow_redirects=False)
+    assert "/login" in r.headers["location"]
+    auth.login_throttle.failures.clear()
+    login(c)

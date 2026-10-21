@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import secrets
+import time
 
 from fastapi import HTTPException, Request
 
@@ -82,3 +83,40 @@ def require(request: Request, *roles):
     if roles and user["role"] not in roles:
         raise HTTPException(403, "Недостаточно прав")
     return user
+
+
+class Throttle:
+    """Counts failed attempts per client and blocks it for a while after too many."""
+
+    def __init__(self, limit, window_seconds):
+        self.limit, self.window = limit, window_seconds
+        self.failures = {}
+
+    def _recent(self, key):
+        now = time.monotonic()
+        recent = [t for t in self.failures.get(key, []) if now - t < self.window]
+        if recent:
+            self.failures[key] = recent
+        else:
+            self.failures.pop(key, None)
+        return recent
+
+    def blocked(self, key):
+        return len(self._recent(key)) >= self.limit
+
+    def fail(self, key):
+        self._recent(key)
+        self.failures.setdefault(key, []).append(time.monotonic())
+
+    def reset(self, key):
+        self.failures.pop(key, None)
+
+
+# Passwords: 10 wrong tries in 15 minutes. Personal codes are short, so the limit is tighter
+# per client: 8 wrong scans in 15 minutes still leaves room for a few misreads.
+login_throttle = Throttle(10, 15 * 60)
+code_throttle = Throttle(8, 15 * 60)
+
+
+def client_key(request: Request):
+    return request.client.host if request.client else "unknown"

@@ -3,5 +3,13 @@
 	request_body {
 		max_size 100MB
 	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
 	reverse_proxy app:8000
 }

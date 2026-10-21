@@ -112,12 +112,18 @@ def login_page(request: Request, next: str = "/"):
 
 @app.post("/login")
 def login(request: Request, login: str = Form(...), password: str = Form(...), next: str = Form("/")):
+    key = auth.client_key(request)
+    if auth.login_throttle.blocked(key):
+        return redirect(f"/login?next={next}", request,
+                        "Слишком много неудачных попыток. Попробуйте через 15 минут.", error=True)
     with db.pool.connection() as conn:
         user = conn.execute(
             "SELECT * FROM users WHERE login = %s AND active AND role <> 'packer'", (login.strip(),)
         ).fetchone()
     if not user or not auth.check_password(password, user["password_hash"]):
+        auth.login_throttle.fail(key)
         return redirect(f"/login?next={next}", request, "Неверный логин или пароль", error=True)
+    auth.login_throttle.reset(key)
     request.session.clear()
     request.session["user_id"] = user["id"]
     return redirect(next if next.startswith("/") and not next.startswith("//") else "/")
@@ -161,6 +167,19 @@ def pack_product(request: Request, product_id: int):
     return render(request, "product.html", user, product=product, last_jobs=last_jobs)
 
 
+def _employee(request, personal_code):
+    key = auth.client_key(request)
+    if auth.code_throttle.blocked(key):
+        return None, "Слишком много неверных личных кодов. Подождите 15 минут или обратитесь к оператору."
+    with db.pool.connection() as conn:
+        employee = auth.user_by_code(conn, personal_code)
+    if not employee:
+        auth.code_throttle.fail(key)
+        return None, "Личный код не найден. Отсканируйте бейдж ещё раз."
+    auth.code_throttle.reset(key)
+    return employee, None
+
+
 def _remember_job(request, job_id):
     jobs = [j for j in request.session.get("jobs", []) if time.time() - j[1] < config.PRINT_LINK_MINUTES * 60]
     jobs.append([job_id, time.time()])
@@ -181,10 +200,9 @@ def do_print(request: Request, product_id: int = Form(...), qty: str = Form(...)
     count = _int(qty)
     if not count or count < 1:
         return redirect(back, request, "Укажите количество цифрами", error=True)
-    with db.pool.connection() as conn:
-        employee = auth.user_by_code(conn, personal_code)
+    employee, error = _employee(request, personal_code)
     if not employee:
-        return redirect(back, request, "Личный код не найден. Отсканируйте бейдж ещё раз.", error=True)
+        return redirect(back, request, error, error=True)
     try:
         job_id = service.print_codes(product_id, count, employee)
     except service.ServiceError as e:
@@ -253,10 +271,9 @@ async def reprint(request: Request):
     job_id = _int(form.get("job_id"))
     back = f"/archive/job/{job_id}" if job_id else "/archive"
     code_ids = [int(v) for v in form.getlist("code_id") if str(v).isdigit()]
-    with db.pool.connection() as conn:
-        employee = auth.user_by_code(conn, form.get("personal_code", ""))
+    employee, error = _employee(request, form.get("personal_code", ""))
     if not employee:
-        return redirect(back, request, "Личный код не найден. Повторная печать только по личному коду.", error=True)
+        return redirect(back, request, error, error=True)
     try:
         new_job = service.reprint_codes(code_ids, employee)
     except service.ServiceError as e:
