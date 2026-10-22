@@ -97,6 +97,10 @@ def test_full_cycle(client, tmp_path):
     pages = PdfReader(__import__("io").BytesIO(pdf.content)).pages
     assert len(pages) == 4
     assert round(float(pages[0].mediabox.height) / 72 * 25.4) == 104
+    small = PdfReader(__import__("io").BytesIO(client.get(f"/jobs/{job_id}/pdf", params={"size": "58x40"}).content)).pages
+    assert len(small) == 4
+    assert [round(float(v) / 72 * 25.4) for v in (small[0].mediabox.width, small[0].mediabox.height)] == [58, 40]
+    assert "58×40" in client.get(f"/jobs/{job_id}/print", params={"size": "58x40"}).text
 
     # Oldest codes go first.
     with db.pool.connection() as conn:

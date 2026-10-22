@@ -3,9 +3,9 @@
 {% block content %}
 <div class="card">
   <h1>{{ 'Печать' if job.kind == 'print' else 'Повторная печать' }} №{{ job.id }}</h1>
-  <p>{{ job.article or 'Разные товары' }} {% if job.size %}р. {{ job.size }}{% endif %} · <b>{{ job.qty }} шт.</b> · {{ job.user_name }} · {{ job.created_at|local }}</p>
+  <p>{{ job.article or 'Разные товары' }} {% if job.size %}р. {{ job.size }}{% endif %} · <b>{{ job.qty }} шт.</b> · {{ job.user_name }} · {{ job.created_at|local }} · этикетка <b>{{ size|replace("x", "×") }}</b></p>
   {% if allowed %}
-    <p>Коды записаны в архив. В окне печати выберите принтер TSC и нажмите «Печать».</p>
+    <p>Коды записаны в архив. В окне печати выберите принтер, в который заправлены этикетки {{ size|replace("x", "×") }}{{ " (TSC TE200)" if size == "58x40" else "" }}, и нажмите «Печать».</p>
     <button class="primary big" id="print-btn" disabled>Открыть окно печати</button>
     <p class="muted">Эта страница печатает только в течение {{ minutes }} мин. Если печать не прошла, перепечатать может администратор из <a href="/archive/job/{{ job.id }}">архива</a>.</p>
   {% else %}
@@ -14,7 +14,7 @@
   <p><a href="/pack">← К поиску</a></p>
 </div>
 {% if allowed %}
-<iframe id="pdf" src="/jobs/{{ job.id }}/pdf" class="pdf"></iframe>
+<iframe id="pdf" src="/jobs/{{ job.id }}/pdf?size={{ size }}" class="pdf"></iframe>
 {% endif %}
 {% endblock %}
 {% block scripts %}{% if allowed %}<script>setupPrint();</script>{% endif %}{% endblock %}

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ product.article }} {{ product.size }}{% endblock %}
+{% from "_sizes.html" import size_picker %}
 {% block content %}
 <p><a href="/pack">← К поиску</a></p>
 <div class="card">
@@ -16,6 +17,7 @@
   <label>Личный код (отсканируйте бейдж)
     <input name="personal_code" type="password" required autocomplete="off">
   </label>
+  {{ size_picker() }}
   <button class="primary big">Печать</button>
   <p class="muted">После нажатия коды сразу уходят в архив. Если печать не пройдёт, перепечатать их может администратор из архива.</p>
 </form>

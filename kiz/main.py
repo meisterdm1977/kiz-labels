@@ -21,6 +21,8 @@ from . import auth, config, db, service
 from .auth import AdminRequired, DeviceRequired, require_admin, require_device
 from .badges import badge_pdf
 from .labels import build_print_pdf, printable_code
+from .small_label import SmallLabelError
+from .small_label import build_pdf as build_small_pdf
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("kiz")
@@ -69,6 +71,14 @@ def _local(value):
 templates.env.filters["local"] = _local
 templates.env.filters["code"] = printable_code
 templates.env.globals["role_names"] = auth.ROLE_NAMES
+# Label sizes for the size switch: the 1С page as is, or the small label drawn by the service.
+SIZES = {"50x104": (50, 104), "58x40": (58, 40)}
+DEFAULT_SIZE = "50x104"
+templates.env.globals["sizes"] = SIZES
+
+
+def _size(value):
+    return value if value in SIZES else DEFAULT_SIZE
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -269,7 +279,8 @@ def _job_allowed(request, job_id):
 
 
 @app.post("/print")
-def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""), personal_code: str = Form("")):
+def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""), personal_code: str = Form(""),
+             size: str = Form(DEFAULT_SIZE)):
     require_device(request)
     back = f"/pack/product/{product_id}"
     count = _int(qty)
@@ -283,33 +294,41 @@ def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""),
     except service.ServiceError as e:
         return redirect(back, request, str(e), error=True)
     _remember_job(request, job_id)
-    return redirect(f"/jobs/{job_id}/print")
+    return redirect(f"/jobs/{job_id}/print?size={_size(size)}")
 
 
 @app.get("/jobs/{job_id}/print", response_class=HTMLResponse)
-def job_print_page(request: Request, job_id: int):
+def job_print_page(request: Request, job_id: int, size: str = DEFAULT_SIZE):
     require_device(request)
     with db.pool.connection() as conn:
         job = service.get_job(conn, job_id)
     if not job:
         return redirect("/pack", request, "Печать не найдена", error=True)
     return render(request, "print.html", job=job, allowed=_job_allowed(request, job_id),
-                  minutes=config.PRINT_LINK_MINUTES)
+                  minutes=config.PRINT_LINK_MINUTES, size=_size(size))
 
 
 @app.get("/jobs/{job_id}/pdf")
-def job_pdf(request: Request, job_id: int):
+def job_pdf(request: Request, job_id: int, size: str = DEFAULT_SIZE):
     require_device(request)
     if not _job_allowed(request, job_id):
         return Response("Ссылка на печать устарела. Перепечатать может администратор из архива.",
                         status_code=403, media_type="text/plain; charset=utf-8")
+    size = _size(size)
     with db.pool.connection() as conn:
-        items = service.job_pdf_items(conn, job_id)
+        items = service.job_pdf_items(conn, job_id, size)
     buf = io.BytesIO()
-    build_print_pdf(items, buf)
+    if size == "58x40":
+        try:
+            build_small_pdf(items, buf)
+        except SmallLabelError as e:
+            return Response(f"Этикетку 58×40 для этой печати собрать не удалось: {e}. Напечатайте размер 50×104.",
+                            status_code=409, media_type="text/plain; charset=utf-8")
+    else:
+        build_print_pdf(items, buf)
     return Response(buf.getvalue(), media_type="application/pdf",
                     headers={"Cache-Control": "no-store",
-                             "Content-Disposition": f'inline; filename="print-{job_id}.pdf"'})
+                             "Content-Disposition": f'inline; filename="print-{job_id}-{size}.pdf"'})
 
 
 # ---------- archive ----------
@@ -351,7 +370,7 @@ async def reprint(request: Request):
     except service.ServiceError as e:
         return redirect(back, request, str(e), error=True)
     _remember_job(request, new_job)
-    return redirect(f"/jobs/{new_job}/print")
+    return redirect(f"/jobs/{new_job}/print?size={_size(form.get('size'))}")
 
 
 # ---------- uploads ----------

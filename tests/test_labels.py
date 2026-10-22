@@ -34,3 +34,32 @@ def test_renders_one_label_sized_page_per_code(tmp_path):
     box = pages[0].mediabox
     assert round(float(box.width) / 72 * 25.4) == 50
     assert round(float(box.height) / 72 * 25.4) == 104
+
+
+def test_small_label_keeps_the_datamatrix_and_is_built_for_old_uploads(tmp_path):
+    from kiz import small_label
+    path = tmp_path / "source.xlsx"
+    codes = make_layout(path, 3)
+    labels = small_label.load(tmp_path)  # no small.json yet: made from source.xlsx
+    assert (tmp_path / small_label.FILE).exists()
+    assert [small_label.modules_decode(l["modules"]) for l in labels] == codes
+    assert labels[0]["ean"] == "2047362903387"
+    assert ["Артикул:", "Шорты 02 коричневый"] in labels[0]["fields"]
+    out = tmp_path / "small.pdf"
+    small_label.build_pdf([(tmp_path, 2), (tmp_path, 0)], str(out))
+    pages = PdfReader(out).pages
+    assert len(pages) == 2
+    assert [round(float(v) / 72 * 25.4) for v in (pages[0].mediabox.width, pages[0].mediabox.height)] == [58, 40]
+
+
+def test_long_texts_shrink_instead_of_being_cut(tmp_path):
+    import openpyxl
+    from kiz.labels import _fit_texts
+    path = tmp_path / "layout.xlsx"
+    make_layout(path, 1, article="Шорты женские летние хлопковые с поясом 02 коричневый")
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    ws.merge_cells("D17:E17")
+    _fit_texts(wb)
+    assert 4.5 <= ws["D17"].font.sz < 11  # the long article is made smaller to fit
+    assert ws["D21"].font.sz == 11  # a short text keeps its size

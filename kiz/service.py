@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from psycopg.types.json import Jsonb
 
-from . import config, db
+from . import config, db, small_label
 from .labels import GS, Label, LayoutError, code_prefix, from_ru_layout, read_workbook, render_pdf
 
 log = logging.getLogger("kiz")
@@ -86,6 +86,11 @@ def process_upload(upload_id):
         (folder / "labels.json").write_text(
             json.dumps([asdict(l) for l in labels], ensure_ascii=False), encoding="utf-8"
         )
+        try:
+            small_label.extract(folder / "source.xlsx", folder)
+        except Exception:
+            # The 58×40 data is made again from the source file when it is first needed.
+            log.exception("upload %s: small label data not prepared", upload_id)
         with db.tx() as conn:
             summary = _summarize(conn, labels)
             conn.execute(
@@ -360,7 +365,10 @@ def job_codes(conn, job_id):
     ).fetchall()
 
 
-def job_pdf_items(conn, job_id):
+def job_pdf_items(conn, job_id, size=None):
+    """What build_print_pdf (50×104 pages of the 1С layout) or small_label.build_pdf (58×40) prints."""
+    if size == "58x40":
+        return [(upload_dir(c["upload_id"]), c["page_no"]) for c in job_codes(conn, job_id)]
     return [(labels_pdf(c["upload_id"]), c["page_no"]) for c in job_codes(conn, job_id)]
 
 

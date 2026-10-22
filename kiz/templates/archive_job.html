@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Архив: печать №{{ job.id }}{% endblock %}
+{% from "_sizes.html" import size_picker %}
 {% block content %}
 <p><a href="/archive">← В архив</a></p>
 <div class="card">
@@ -20,6 +21,7 @@
     {% endfor %}
     </tbody>
   </table>
+  {{ size_picker() }}
   <button class="primary big">Перепечатать выбранные</button>
   <p class="muted">Повторная печать записывается в журнал под вашим именем.</p>
 </form>

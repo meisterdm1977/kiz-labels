@@ -1,14 +1,14 @@
 """Reading label layouts exported from 1С: codes, product fields and print-ready pages."""
 import io
 import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import openpyxl
-from PIL import Image, ImageOps
+from openpyxl.styles import Font
+from PIL import Image, ImageFont, ImageOps
 from pylibdmtx.pylibdmtx import decode as dmtx_decode
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NameObject
@@ -159,11 +159,87 @@ def read_workbook(path):
     return labels
 
 
+_FONT_FILES = {
+    False: ["/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"],
+    True: ["/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf",
+           "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"],
+}
+_fonts = {}
+
+
+def _measure_font(bold, size):
+    key = (bold, round(size * 2))
+    if key not in _fonts:
+        path = next((f for f in _FONT_FILES[bold] if Path(f).exists()), None)
+        _fonts[key] = ImageFont.truetype(path, size) if path else ImageFont.load_default()
+    return _fonts[key]
+
+
+def _wrap(text, font, width):
+    lines = []
+    for paragraph in text.split("\n"):
+        line = ""
+        for word in paragraph.split():
+            candidate = f"{line} {word}".strip()
+            if line and font.getlength(candidate) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = candidate
+        lines.append(line)
+    return lines
+
+
+def _fit_texts(wb):
+    """Text in a merged cell of the 1С layout is cut off when it is longer than the cell (a long
+    article, a long composition). Shrink the font just enough to show it whole; text that already
+    fits is left alone."""
+    default = wb._fonts[0]
+    # Column width is counted in widest digits of the workbook's default font, plus 5 px padding.
+    digit = _measure_font(bool(default.b), (default.sz or 11) * 96 / 72).getlength("0")
+    for ws in wb.worksheets:
+        for merged in ws.merged_cells.ranges:
+            cell = ws.cell(merged.min_row, merged.min_col)
+            if isinstance(cell.value, str) and cell.value.strip():
+                _fit_cell(ws, merged, cell, digit)
+
+
+def _fit_cell(ws, merged, cell, digit):
+    width = sum(round((ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width or 8.43) * digit) + 5
+                for c in range(merged.min_col, merged.max_col + 1)) * 0.75 - 3
+    height = sum(ws.row_dimensions[r].height or 15 for r in range(merged.min_row, merged.max_row + 1))
+    size = original = float(cell.font.sz or 11)
+    bold, text = bool(cell.font.b), cell.value.strip()
+    paragraphs = len(text.split("\n"))
+
+    def fits(size):
+        font = _measure_font(bold, size)
+        if not cell.alignment.wrap_text:
+            return all(font.getlength(line) <= width for line in text.split("\n"))
+        lines = _wrap(text, font, width)
+        if len(lines) <= paragraphs:
+            return True
+        return len(lines) * size * 1.3 <= height
+
+    while size > 4.5 and not fits(size):
+        size -= 0.5
+    if size != original:
+        cell.font = Font(**{**_font_kwargs(cell.font), "sz": size})
+
+
+def _font_kwargs(font):
+    return {k: getattr(font, k) for k in ("name", "b", "i", "u", "strike", "color", "vertAlign", "charset",
+                                          "outline", "shadow", "condense", "extend", "family", "scheme")}
+
+
 def render_pdf(xlsx_path, out_pdf, expected_pages):
     """Convert the layout to PDF and cut each page down to the label size."""
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "labels.xlsx"
-        shutil.copy(xlsx_path, src)
+        wb = openpyxl.load_workbook(xlsx_path)
+        _fit_texts(wb)
+        wb.save(src)
         result = subprocess.run(
             [config.SOFFICE, f"-env:UserInstallation=file://{tmp}/profile",
              "--headless", "--convert-to", "pdf", "--outdir", tmp, str(src)],

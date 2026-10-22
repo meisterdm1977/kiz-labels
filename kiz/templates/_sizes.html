@@ -1,0 +1,12 @@
+{% macro size_picker(selected="50x104") %}
+<fieldset class="sizes">
+  <legend>Размер этикетки</legend>
+  {% for key, (w, h) in sizes.items() %}
+  <label class="size-opt">
+    <input type="radio" name="size" value="{{ key }}" {{ 'checked' if key == selected }}>
+    <span class="size-icon" style="width: {{ w * 0.6 }}px; height: {{ h * 0.6 }}px"></span>
+    <span>{{ w }}×{{ h }}</span>
+  </label>
+  {% endfor %}
+</fieldset>
+{% endmacro %}
