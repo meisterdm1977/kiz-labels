@@ -113,7 +113,7 @@ class Throttle:
         self.failures.pop(key, None)
 
 
-# Passwords: 10 wrong tries in 15 minutes. Personal codes: 20 wrong scans in 15 minutes per client,
+# Passwords: 10 wrong tries in 15 minutes. Personal codes are scanned all day on one shared
 # computer, and all packers share one office address, so their limit is looser: 20 in 15 minutes.
 login_throttle = Throttle(10, 15 * 60)
 code_throttle = Throttle(20, 15 * 60)
