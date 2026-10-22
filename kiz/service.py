@@ -184,6 +184,68 @@ def find_products(conn, query, limit=50):
     ).fetchall()
 
 
+def _edit_distance(a, b, limit):
+    """Edits (insert, delete, replace, swap of neighbours) to turn a into b, or limit + 1 if more."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev2, prev = None, list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+            if prev2 is not None and i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        if min(cur) > limit:
+            return limit + 1
+        prev2, prev = prev, cur
+    return prev[-1]
+
+
+def _token_cost(token, words):
+    """0 when the token is part of a word, the number of typos when it is close to one, None otherwise."""
+    if any(token in w for w in words):
+        return 0
+    if token.isdigit() or len(token) < 4:
+        return None
+    limit = 1 if len(token) <= 5 else 2
+    best = min(
+        min(_edit_distance(token, w, limit), _edit_distance(token, w[:len(token)], limit)) for w in words
+    ) if words else limit + 1
+    return best if best <= limit else None
+
+
+def suggest_products(conn, query, limit=10):
+    """Products for the search suggestions: exact matches first, then ones within a typo or two."""
+    tokens = (query or "").lower().replace("ё", "е").split()
+    if not tokens:
+        return []
+    exact = find_products(conn, query, limit)
+    if len(exact) >= limit:
+        return exact
+    scored = []
+    seen = {p["id"] for p in exact}
+    for p in conn.execute("SELECT id, search FROM products").fetchall():
+        if p["id"] in seen:
+            continue
+        words = p["search"].replace("ё", "е").split()
+        costs = [_token_cost(t, words) for t in tokens]
+        if None not in costs:
+            scored.append((sum(costs), p["id"]))
+    scored.sort()
+    ids = [pid for _, pid in scored[: limit - len(exact)]]
+    if not ids:
+        return exact
+    fuzzy = conn.execute(
+        """
+        SELECT p.*, (SELECT count(*) FROM codes c WHERE c.product_id = p.id AND c.status = 'stock') AS stock
+        FROM products p WHERE p.id = ANY(%s)
+        """,
+        (ids,),
+    ).fetchall()
+    fuzzy.sort(key=lambda p: ids.index(p["id"]))
+    return exact + fuzzy
+
+
 def product_by_ean(conn, ean):
     return conn.execute("SELECT * FROM products WHERE ean = %s", (ean.strip(),)).fetchone()
 

@@ -2,7 +2,10 @@
 {% block title %}Печать{% endblock %}
 {% block content %}
 <form method="get" action="/pack" class="search">
-  <input name="q" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" autofocus autocomplete="off" data-select>
+  <div class="suggest grow">
+    <input name="q" id="product-search" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" autofocus autocomplete="off" data-select>
+    <ul id="product-suggest" class="suggest-list" hidden></ul>
+  </div>
   <button class="primary">Найти</button>
 </form>
 {% if q %}
@@ -25,3 +28,4 @@
 <p class="muted">Введите артикул с размером, например «Шорты 02 коричневый 40», или отсканируйте баркод товара.</p>
 {% endif %}
 {% endblock %}
+{% block scripts %}<script>setupProductSearch();</script>{% endblock %}

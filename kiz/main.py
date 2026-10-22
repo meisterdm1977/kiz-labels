@@ -216,8 +216,17 @@ def pack(request: Request, q: str = ""):
             product = service.product_by_ean(conn, q)
             if product:
                 return redirect(f"/pack/product/{product['id']}")
-        products = service.find_products(conn, q)
+        products = service.find_products(conn, q) or service.suggest_products(conn, q, limit=50)
     return render(request, "pack.html", q=q, products=products)
+
+
+@app.get("/pack/suggest")
+def pack_suggest(request: Request, q: str = ""):
+    require_device(request)
+    with db.pool.connection() as conn:
+        products = service.suggest_products(conn, q.strip())
+    return [{"id": p["id"], "article": p["article"], "size": p["size"], "color": p["color"],
+             "stock": p["stock"]} for p in products]
 
 
 @app.get("/pack/product/{product_id}", response_class=HTMLResponse)

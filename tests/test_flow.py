@@ -298,3 +298,16 @@ def test_staff_list_shows_codes_and_reimport_updates(client, tmp_path):
     page = client.post(f"/users/{zoya['id']}/code", data={"personal_code": "7702"}).text
     assert "Код изменён" in page and "7702" in page
     assert client.get("/users/badge.pdf", follow_redirects=False).status_code in (200, 303)
+
+
+def test_product_suggestions_forgive_typos(client):
+    login(client)
+    found = client.get("/pack/suggest", params={"q": "шотрты 40"}).json()
+    assert found and found[0]["article"] == "Шорты 02 коричневый" and found[0]["size"] == "40"
+    assert "stock" in found[0]
+    assert client.get("/pack/suggest", params={"q": "платье"}).json() == []
+    # The search page falls back to the same typo-tolerant match.
+    assert "Шорты 02 коричневый" in client.get("/pack", params={"q": "шотрты"}).text
+    from fastapi.testclient import TestClient
+    from kiz.main import app
+    assert TestClient(app).get("/pack/suggest", params={"q": "шорты"}, follow_redirects=False).status_code == 303

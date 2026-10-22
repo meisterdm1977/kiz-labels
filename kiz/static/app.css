@@ -56,3 +56,5 @@ iframe.pdf { width: 100%; height: 70vh; border: 1px solid var(--line); border-ra
                 background: #fff; border: 1px solid #c9ced6; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.12); }
 .suggest-list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; }
 .suggest-list li.active, .suggest-list li:hover { background: #eef4ff; }
+.suggest.grow { flex: 1; max-width: none; margin: 0; }
+.suggest-list li.empty { color: var(--muted); }
