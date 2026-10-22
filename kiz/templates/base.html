@@ -7,23 +7,28 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-{% if user %}
+{% if device %}
 <header class="top">
   <nav>
     <a href="/pack" class="brand">Этикетки ЧЗ</a>
     <a href="/pack">Печать</a>
+    {% if admin %}
     <a href="/archive">Архив</a>
-    {% if user.role in ('admin', 'operator') %}
     <a href="/uploads">Загрузка</a>
     <a href="/stock">Остатки</a>
     <a href="/journal">Журнал</a>
+    <a href="/users">Сотрудники</a>
+    <a href="/devices">Компьютеры</a>
     {% endif %}
-    {% if user.role == 'admin' %}<a href="/users">Сотрудники</a>{% endif %}
   </nav>
-  <form method="post" action="/logout" class="who">
-    <span>{{ user.name }}</span>
+  {% if admin %}
+  <form method="post" action="/admin/logout" class="who">
+    <span>{{ admin.name }}</span>
     <button class="link">Выйти</button>
   </form>
+  {% else %}
+  <a href="/admin" class="who admin-btn">Администратор</a>
+  {% endif %}
 </header>
 {% endif %}
 <main>

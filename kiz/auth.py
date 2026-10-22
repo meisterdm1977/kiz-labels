@@ -2,18 +2,20 @@ import hashlib
 import hmac
 import secrets
 import time
+from datetime import datetime, timezone
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from . import config, db
 from .labels import from_ru_layout
 
 ROLE_NAMES = {
     "admin": "Администратор",
-    "operator": "Оператор",
     "packer": "Упаковщик",
-    "station": "Компьютер упаковки",
 }
+
+DEVICE_COOKIE = "kiz_device"
+DEVICE_COOKIE_DAYS = 3650
 
 
 def hash_password(password):
@@ -63,27 +65,83 @@ def ensure_admin():
             )
 
 
-def current_user(request: Request):
-    user_id = request.session.get("user_id")
-    if not user_id:
+def admin_by_password(conn, password):
+    """Administrators sign in with the password alone, so each one must have a different password."""
+    admins = conn.execute(
+        "SELECT * FROM users WHERE role = 'admin' AND active AND password_hash IS NOT NULL ORDER BY id"
+    ).fetchall()
+    return next((a for a in admins if check_password(password, a["password_hash"])), None)
+
+
+def _token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def approve_device(conn, name, admin, ip):
+    """Registers this browser as an allowed computer and returns the token for its cookie."""
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO devices (name, token_hash, approved_by, last_ip, last_seen_at) VALUES (%s, %s, %s, %s, now())",
+        (name, _token_hash(token), admin["id"], ip),
+    )
+    return token
+
+
+def current_device(request: Request):
+    token = request.cookies.get(DEVICE_COOKIE)
+    if not token:
         return None
     with db.pool.connection() as conn:
-        return conn.execute(
-            "SELECT * FROM users WHERE id = %s AND active", (user_id,)
+        device = conn.execute(
+            "SELECT * FROM devices WHERE token_hash = %s AND active", (_token_hash(token),)
         ).fetchone()
+        if device and (device["last_seen_at"] is None
+                       or (datetime.now(timezone.utc) - device["last_seen_at"]).total_seconds() > 300):
+            conn.execute("UPDATE devices SET last_seen_at = now(), last_ip = %s WHERE id = %s",
+                         (client_key(request), device["id"]))
+    return device
 
 
-class LoginRequired(Exception):
+def current_admin(request: Request):
+    admin_id = request.session.get("admin_id")
+    seen = request.session.get("admin_seen", 0)
+    if not admin_id or time.time() - seen > config.ADMIN_IDLE_MINUTES * 60:
+        request.session.pop("admin_id", None)
+        return None
+    with db.pool.connection() as conn:
+        admin = conn.execute(
+            "SELECT * FROM users WHERE id = %s AND role = 'admin' AND active", (admin_id,)
+        ).fetchone()
+    if not admin:
+        request.session.pop("admin_id", None)
+        return None
+    request.session["admin_seen"] = time.time()
+    return admin
+
+
+class DeviceRequired(Exception):
     pass
 
 
-def require(request: Request, *roles):
-    user = current_user(request)
-    if not user:
-        raise LoginRequired()
-    if roles and user["role"] not in roles:
-        raise HTTPException(403, "Недостаточно прав")
-    return user
+class AdminRequired(Exception):
+    pass
+
+
+def require_device(request: Request):
+    """Every page except the approval page is open only on computers an administrator allowed."""
+    device = current_device(request)
+    if not device:
+        raise DeviceRequired()
+    request.state.device = device
+    request.state.admin = current_admin(request)
+    return device
+
+
+def require_admin(request: Request):
+    require_device(request)
+    if not request.state.admin:
+        raise AdminRequired()
+    return request.state.admin
 
 
 class Throttle:

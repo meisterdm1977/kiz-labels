@@ -50,10 +50,8 @@ function setupPrint() {
 function toggleLoginFields() {
   const role = document.getElementById("role");
   const fields = document.getElementById("login-fields");
-  const code = document.getElementById("code-field");
   const update = () => {
-    fields.style.display = role.value === "packer" ? "none" : "";
-    code.style.display = role.value === "station" ? "none" : "";
+    fields.style.display = role.value === "admin" ? "" : "none";
   };
   role.addEventListener("change", update);
   update();

@@ -247,8 +247,6 @@ def print_codes(product_id, qty, user):
 
 
 def reprint_codes(code_ids, user):
-    if not user["can_reprint"]:
-        raise ServiceError("У этого сотрудника нет права на повторную печать.")
     if not code_ids:
         raise ServiceError("Выберите коды для повторной печати.")
     with db.tx() as conn:

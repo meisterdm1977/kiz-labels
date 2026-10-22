@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Компьютер не допущен{% endblock %}
+{% block content %}
+<form method="post" action="/device" class="card narrow" data-once>
+  <h1>Компьютер не допущен</h1>
+  <p class="muted">Сайт открывается только на компьютерах, которые разрешил администратор.
+    Чтобы разрешить этот компьютер, администратор вводит здесь свой пароль. Это нужно сделать один раз.</p>
+  <label>Название компьютера <input name="name" placeholder="например, Упаковка 1" maxlength="60"></label>
+  <label>Пароль администратора <input name="password" type="password" required autocomplete="current-password"></label>
+  <button class="primary">Разрешить этот компьютер</button>
+</form>
+{% endblock %}

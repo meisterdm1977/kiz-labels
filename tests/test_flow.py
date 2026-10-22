@@ -8,9 +8,16 @@ from kiz import db
 from make_layout import make_layout
 
 
-def login(client, login="admin", password="admin-password"):
-    r = client.post("/login", data={"login": login, "password": password}, follow_redirects=False)
-    assert r.status_code == 303 and "/login" not in r.headers["location"]
+def approve(client, password="admin-password", name="Упаковка"):
+    r = client.post("/device", data={"name": name, "password": password}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/pack"
+
+
+def login(client, password="admin-password"):
+    if not client.cookies.get("kiz_device"):
+        approve(client, password)
+    r = client.post("/admin", data={"password": password}, follow_redirects=False)
+    assert r.status_code == 303 and "/admin" not in r.headers["location"]
 
 
 def wait_upload(client, upload_id):
@@ -46,7 +53,7 @@ def stock_of(ean):
 
 
 def test_full_cycle(client, tmp_path):
-    assert client.get("/pack", follow_redirects=False).status_code == 303
+    assert client.get("/pack", follow_redirects=False).headers["location"] == "/device"
     login(client)
     anna = create_packer(client, "Анна")
 
@@ -103,21 +110,19 @@ def test_full_cycle(client, tmp_path):
     client.post("/print", data={"product_id": product_id, "qty": "6", "personal_code": anna})
     assert stock_of("2047362903387") == 5
 
-    # Archive: find a code by its scan without GS separators, reprint with personal code.
+    # Archive: find a code by its scan without GS separators, the administrator reprints it.
     scan = codes[1].replace("\x1d", "")
     archive = client.get("/archive", params={"code": scan}).text
     assert "напечатан" in archive
     with db.pool.connection() as conn:
         code_id = conn.execute("SELECT id FROM codes WHERE code = %s", (codes[1],)).fetchone()["id"]
-    client.post("/reprint", data={"job_id": job_id, "code_id": code_id, "personal_code": "bad"})
-    r = client.post("/reprint", data={"job_id": job_id, "code_id": code_id, "personal_code": anna},
-                    follow_redirects=False)
+    r = client.post("/reprint", data={"job_id": job_id, "code_id": code_id}, follow_redirects=False)
     reprint_job = int(re.search(r"/jobs/(\d+)/print", r.headers["location"]).group(1))
     assert len(PdfReader(__import__("io").BytesIO(client.get(f"/jobs/{reprint_job}/pdf").content)).pages) == 1
     assert stock_of("2047362903387") == 5
 
     journal = client.get("/journal").text
-    assert "Анна" in journal and "Повторная печать" in journal
+    assert "Анна" in journal and "Повторная печать" in journal and "Администратор" in journal
     assert "Напечатано: <b>4</b>" in journal and "Перепечатано: <b>1</b>" in journal
     assert client.get("/journal.xlsx").status_code == 200
     assert client.get("/stock.xlsx").status_code == 200
@@ -174,9 +179,9 @@ def test_password_guessing_is_blocked():
     auth.login_throttle.failures.clear()
     c = TestClient(app)
     for _ in range(10):
-        c.post("/login", data={"login": "admin", "password": "wrong"})
-    r = c.post("/login", data={"login": "admin", "password": "admin-password"}, follow_redirects=False)
-    assert "/login" in r.headers["location"]
+        c.post("/device", data={"password": "wrong"})
+    r = c.post("/device", data={"password": "admin-password"}, follow_redirects=False)
+    assert r.headers["location"] == "/device"
     auth.login_throttle.failures.clear()
     login(c)
 
@@ -212,3 +217,53 @@ def test_own_and_imported_personal_codes(client, tmp_path):
     with db.pool.connection() as conn:
         assert auth.user_by_code(conn, "98765") is None
         assert auth.user_by_code(conn, "5555")["name"] == "Пётр"
+
+
+def test_only_approved_computers_and_admin_sections(client):
+    from fastapi.testclient import TestClient
+    from kiz import auth, config
+    from kiz.main import app
+
+    stranger = TestClient(app)
+    for path in ["/pack", "/archive", "/stock", "/users", "/journal.xlsx", "/pack/product/1"]:
+        assert stranger.get(path, follow_redirects=False).headers["location"] == "/device"
+    # A made-up device cookie does not help.
+    stranger.cookies.set("kiz_device", "guess")
+    assert stranger.get("/pack", follow_redirects=False).headers["location"] == "/device"
+
+    packing = TestClient(app)
+    approve(packing, name="Упаковка 2")
+    assert packing.get("/pack").status_code == 200
+    for path in ["/archive", "/uploads", "/stock", "/journal", "/users", "/devices"]:
+        r = packing.get(path, follow_redirects=False)
+        assert r.headers["location"].startswith("/admin?next="), path
+    assert "/admin" in packing.post("/reprint", data={"code_id": 1}, follow_redirects=False).headers["location"]
+    assert "Архив" not in packing.get("/pack").text and "Администратор" in packing.get("/pack").text
+
+    # Administrator mode closes after the idle time.
+    login(packing)
+    assert packing.get("/stock").status_code == 200
+    config.ADMIN_IDLE_MINUTES, saved = 0, config.ADMIN_IDLE_MINUTES
+    try:
+        assert packing.get("/stock", follow_redirects=False).status_code == 303
+    finally:
+        config.ADMIN_IDLE_MINUTES = saved
+    login(packing)
+    packing.post("/admin/logout")
+    assert packing.get("/stock", follow_redirects=False).status_code == 303
+
+    # The administrator switches a computer off and it loses access at once.
+    login(client)
+    with db.pool.connection() as conn:
+        device_id = conn.execute("SELECT id FROM devices WHERE name = 'Упаковка 2'").fetchone()["id"]
+    assert "Упаковка 2" in client.get("/devices").text
+    client.post(f"/devices/{device_id}/toggle")
+    assert packing.get("/pack", follow_redirects=False).headers["location"] == "/device"
+
+    # Administrators sign in by password alone, so two of them cannot share one.
+    page = client.post("/users", data={"name": "Второй", "role": "admin", "password": "admin-password"}).text
+    assert "уже у другого администратора" in page
+    client.post("/users", data={"name": "Второй", "role": "admin", "password": "second-pass"})
+    other = TestClient(app)
+    login(other, "second-pass")
+    auth.login_throttle.failures.clear()

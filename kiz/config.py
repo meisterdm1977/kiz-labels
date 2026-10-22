@@ -26,6 +26,7 @@ LABEL_HEIGHT_MM = float(_env("LABEL_HEIGHT_MM", "104"))
 ARCHIVE_DAYS = int(_env("ARCHIVE_DAYS", "183"))
 # How long a freshly created print job's PDF can be opened without a personal code.
 PRINT_LINK_MINUTES = int(_env("PRINT_LINK_MINUTES", "10"))
+ADMIN_IDLE_MINUTES = int(_env("ADMIN_IDLE_MINUTES", "15"))
 DEFAULT_MIN_STOCK = int(_env("DEFAULT_MIN_STOCK", "50"))
 
 SOFFICE = _env("SOFFICE", "soffice")

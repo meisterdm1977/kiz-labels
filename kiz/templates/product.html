@@ -17,10 +17,10 @@
     <input name="personal_code" type="password" required autocomplete="off">
   </label>
   <button class="primary big">Печать</button>
-  <p class="muted">После нажатия коды сразу уходят в архив. Если печать не пройдёт, перепечатайте их из архива по личному коду.</p>
+  <p class="muted">После нажатия коды сразу уходят в архив. Если печать не пройдёт, перепечатать их может администратор из архива.</p>
 </form>
 {% else %}
-<div class="flash error">Коды этого товара закончились. Сообщите оператору.</div>
+<div class="flash error">Коды этого товара закончились. Сообщите администратору.</div>
 {% endif %}
 {% if last_jobs %}
 <h2>Последние печати</h2>
@@ -30,7 +30,7 @@
   {% for j in last_jobs %}
   <tr><td>{{ j.created_at|local }}</td><td>{{ j.user_name }}</td>
       <td>{{ 'Печать' if j.kind == 'print' else 'Повторная' }}</td><td class="num">{{ j.qty }}</td>
-      <td><a href="/archive/job/{{ j.id }}">в архиве</a></td></tr>
+      <td>{% if admin %}<a href="/archive/job/{{ j.id }}">в архиве</a>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

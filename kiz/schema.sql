@@ -72,3 +72,18 @@ CREATE TABLE IF NOT EXISTS settings (
     key     text PRIMARY KEY,
     value   text NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS devices (
+    id            serial PRIMARY KEY,
+    name          text NOT NULL,
+    token_hash    text NOT NULL UNIQUE,
+    approved_by   integer REFERENCES users(id),
+    active        boolean NOT NULL DEFAULT true,
+    last_ip       text,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    last_seen_at  timestamptz
+);
+
+-- Two roles remain: the packing computer became an approved device, operators became packers.
+UPDATE users SET active = false WHERE role = 'station' AND active;
+UPDATE users SET role = 'packer', login = NULL, password_hash = NULL WHERE role = 'operator';

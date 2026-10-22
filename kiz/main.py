@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, config, db, service
-from .auth import LoginRequired, require
+from .auth import AdminRequired, DeviceRequired, require_admin, require_device
 from .badges import badge_pdf
 from .labels import build_print_pdf, printable_code
 
@@ -25,9 +25,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("kiz")
 
 HERE = Path(__file__).parent
-STAFF = ("admin", "operator")
-ANYONE = ("admin", "operator", "station")
-
 
 async def _cleanup_loop():
     while True:
@@ -77,7 +74,7 @@ templates.env.globals["role_names"] = auth.ROLE_NAMES
 async def _http_error(request, exc):
     texts = {403: "Недостаточно прав для этой страницы.", 404: "Такой страницы нет."}
     return templates.TemplateResponse(
-        request, "error.html", {"user": None, "flash": None, "text": texts.get(exc.status_code, str(exc.detail))},
+        request, "error.html", {"flash": None, "text": texts.get(exc.status_code, str(exc.detail))},
         status_code=exc.status_code,
     )
 
@@ -85,21 +82,29 @@ async def _http_error(request, exc):
 @app.exception_handler(RequestValidationError)
 async def _bad_request(request, exc):
     return templates.TemplateResponse(
-        request, "error.html", {"user": None, "flash": None, "text": "Неверный адрес или данные формы."},
+        request, "error.html", {"flash": None, "text": "Неверный адрес или данные формы."},
         status_code=400,
     )
 
 
-@app.exception_handler(LoginRequired)
-async def _login_required(request, exc):
-    return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
+@app.exception_handler(DeviceRequired)
+async def _device_required(request, exc):
+    return RedirectResponse("/device", status_code=303)
 
 
-def render(request, name, user=None, **context):
+@app.exception_handler(AdminRequired)
+async def _admin_required(request, exc):
+    return RedirectResponse(f"/admin?next={request.url.path}", status_code=303)
+
+
+def render(request, name, **context):
     flash = request.session.pop("flash", None)
-    return templates.TemplateResponse(
-        request, name, {"user": user, "flash": flash, **context}
-    )
+    return templates.TemplateResponse(request, name, {
+        "device": getattr(request.state, "device", None),
+        "admin": getattr(request.state, "admin", None),
+        "flash": flash,
+        **context,
+    })
 
 
 def redirect(url, request=None, message=None, error=False):
@@ -122,49 +127,88 @@ def _int(value):
         return None
 
 
-# ---------- login ----------
+# ---------- computer approval and administrator ----------
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, next: str = "/"):
-    return render(request, "login.html", next=next)
+def _safe_next(url, default):
+    return url if url.startswith("/") and not url.startswith("//") else default
 
 
-@app.post("/login")
-def login(request: Request, login: str = Form(...), password: str = Form(...), next: str = Form("/")):
+def _check_admin_password(request, password):
+    """The administrator found by password, or an error text. Wrong passwords count towards a block."""
     key = auth.client_key(request)
     if auth.login_throttle.blocked(key):
-        return redirect(f"/login?next={next}", request,
-                        "Слишком много неудачных попыток. Попробуйте через 15 минут.", error=True)
+        return None, "Слишком много неудачных попыток. Попробуйте через 15 минут."
     with db.pool.connection() as conn:
-        user = conn.execute(
-            "SELECT * FROM users WHERE login = %s AND active AND role <> 'packer'", (login.strip(),)
-        ).fetchone()
-    if not user or not auth.check_password(password, user["password_hash"]):
+        admin = auth.admin_by_password(conn, password)
+    if not admin:
         auth.login_throttle.fail(key)
-        return redirect(f"/login?next={next}", request, "Неверный логин или пароль", error=True)
+        return None, "Неверный пароль администратора"
     auth.login_throttle.reset(key)
-    request.session.clear()
-    request.session["user_id"] = user["id"]
-    return redirect(next if next.startswith("/") and not next.startswith("//") else "/")
+    return admin, None
 
 
-@app.post("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return redirect("/login")
+@app.get("/device", response_class=HTMLResponse)
+def device_page(request: Request):
+    if auth.current_device(request):
+        return redirect("/pack")
+    return render(request, "device.html")
+
+
+@app.post("/device")
+def device_approve(request: Request, name: str = Form(""), password: str = Form(...)):
+    admin, error = _check_admin_password(request, password)
+    if not admin:
+        return redirect("/device", request, error, error=True)
+    with db.tx() as conn:
+        token = auth.approve_device(conn, name.strip()[:60] or "Компьютер", admin, auth.client_key(request))
+    response = redirect("/pack", request, "Компьютер допущен к работе")
+    response.set_cookie(auth.DEVICE_COOKIE, token, max_age=auth.DEVICE_COOKIE_DAYS * 86400, httponly=True,
+                        samesite="lax", secure=request.url.scheme == "https")
+    return response
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, next: str = "/stock"):
+    require_device(request)
+    if request.state.admin:
+        return redirect(_safe_next(next, "/stock"))
+    return render(request, "admin_login.html", next=next)
+
+
+@app.post("/admin")
+def admin_login(request: Request, password: str = Form(...), next: str = Form("/stock")):
+    require_device(request)
+    admin, error = _check_admin_password(request, password)
+    if not admin:
+        return redirect(f"/admin?next={next}", request, error, error=True)
+    request.session["admin_id"] = admin["id"]
+    request.session["admin_seen"] = time.time()
+    return redirect(_safe_next(next, "/stock"))
+
+
+@app.post("/admin/logout")
+def admin_logout(request: Request):
+    request.session.pop("admin_id", None)
+    request.session.pop("admin_seen", None)
+    return redirect("/pack")
+
+
+@app.get("/login")
+def old_login():
+    return redirect("/admin")
 
 
 @app.get("/")
 def home(request: Request):
-    user = require(request)
-    return redirect("/pack" if user["role"] == "station" else "/stock")
+    require_device(request)
+    return redirect("/pack")
 
 
 # ---------- packing station ----------
 
 @app.get("/pack", response_class=HTMLResponse)
 def pack(request: Request, q: str = ""):
-    user = require(request, *ANYONE)
+    require_device(request)
     q = q.strip()
     with db.pool.connection() as conn:
         if q.isdigit() and len(q) == 13:
@@ -172,18 +216,18 @@ def pack(request: Request, q: str = ""):
             if product:
                 return redirect(f"/pack/product/{product['id']}")
         products = service.find_products(conn, q)
-    return render(request, "pack.html", user, q=q, products=products)
+    return render(request, "pack.html", q=q, products=products)
 
 
 @app.get("/pack/product/{product_id}", response_class=HTMLResponse)
 def pack_product(request: Request, product_id: int):
-    user = require(request, *ANYONE)
+    require_device(request)
     with db.pool.connection() as conn:
         product = service.get_product(conn, product_id)
         last_jobs = service.list_jobs(conn, query=product["ean"], limit=5) if product else []
     if not product:
         return redirect("/pack", request, "Товар не найден", error=True)
-    return render(request, "product.html", user, product=product, last_jobs=last_jobs)
+    return render(request, "product.html", product=product, last_jobs=last_jobs)
 
 
 def _employee(request, personal_code):
@@ -191,7 +235,7 @@ def _employee(request, personal_code):
         return None, "Отсканируйте свой бейдж в поле «Личный код»."
     key = auth.client_key(request)
     if auth.code_throttle.blocked(key):
-        return None, "Слишком много неверных личных кодов. Подождите 15 минут или обратитесь к оператору."
+        return None, "Слишком много неверных личных кодов. Подождите 15 минут или обратитесь к администратору."
     with db.pool.connection() as conn:
         employee = auth.user_by_code(conn, personal_code)
     if not employee:
@@ -216,7 +260,7 @@ def _job_allowed(request, job_id):
 
 @app.post("/print")
 def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""), personal_code: str = Form("")):
-    require(request, *ANYONE)
+    require_device(request)
     back = f"/pack/product/{product_id}"
     count = _int(qty)
     if not count or count < 1:
@@ -234,20 +278,20 @@ def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""),
 
 @app.get("/jobs/{job_id}/print", response_class=HTMLResponse)
 def job_print_page(request: Request, job_id: int):
-    user = require(request, *ANYONE)
+    require_device(request)
     with db.pool.connection() as conn:
         job = service.get_job(conn, job_id)
     if not job:
         return redirect("/pack", request, "Печать не найдена", error=True)
-    return render(request, "print.html", user, job=job, allowed=_job_allowed(request, job_id),
+    return render(request, "print.html", job=job, allowed=_job_allowed(request, job_id),
                   minutes=config.PRINT_LINK_MINUTES)
 
 
 @app.get("/jobs/{job_id}/pdf")
 def job_pdf(request: Request, job_id: int):
-    require(request, *ANYONE)
+    require_device(request)
     if not _job_allowed(request, job_id):
-        return Response("Ссылка на печать устарела. Перепечатайте из архива по личному коду.",
+        return Response("Ссылка на печать устарела. Перепечатать может администратор из архива.",
                         status_code=403, media_type="text/plain; charset=utf-8")
     with db.pool.connection() as conn:
         items = service.job_pdf_items(conn, job_id)
@@ -263,40 +307,37 @@ def job_pdf(request: Request, job_id: int):
 @app.get("/archive", response_class=HTMLResponse)
 def archive(request: Request, q: str = "", code: str = "", user_id: str = "",
             date_from: str = "", date_to: str = ""):
-    user = require(request, *ANYONE)
+    require_admin(request)
     with db.pool.connection() as conn:
         found_codes = service.find_code(conn, code) if code.strip() else None
         jobs = [] if found_codes is not None else service.list_jobs(
             conn, q, _int(user_id), _date(date_from), _date(date_to), limit=100
         )
         users = conn.execute("SELECT id, name FROM users WHERE code_hash IS NOT NULL ORDER BY name").fetchall()
-    return render(request, "archive.html", user, q=q, code=code, user_id=_int(user_id),
+    return render(request, "archive.html", q=q, code=code, user_id=_int(user_id),
                   date_from=date_from, date_to=date_to, jobs=jobs, found_codes=found_codes, users=users)
 
 
 @app.get("/archive/job/{job_id}", response_class=HTMLResponse)
 def archive_job(request: Request, job_id: int, highlight: int = 0):
-    user = require(request, *ANYONE)
+    require_admin(request)
     with db.pool.connection() as conn:
         job = service.get_job(conn, job_id)
         codes = service.job_codes(conn, job_id) if job else []
     if not job:
         return redirect("/archive", request, "Печать не найдена", error=True)
-    return render(request, "archive_job.html", user, job=job, codes=codes, highlight=highlight)
+    return render(request, "archive_job.html", job=job, codes=codes, highlight=highlight)
 
 
 @app.post("/reprint")
 async def reprint(request: Request):
-    require(request, *ANYONE)
+    admin = require_admin(request)
     form = await request.form()
     job_id = _int(form.get("job_id"))
     back = f"/archive/job/{job_id}" if job_id else "/archive"
     code_ids = [int(v) for v in form.getlist("code_id") if str(v).isdigit()]
-    employee, error = _employee(request, form.get("personal_code", ""))
-    if not employee:
-        return redirect(back, request, error, error=True)
     try:
-        new_job = service.reprint_codes(code_ids, employee)
+        new_job = service.reprint_codes(code_ids, admin)
     except service.ServiceError as e:
         return redirect(back, request, str(e), error=True)
     _remember_job(request, new_job)
@@ -307,15 +348,15 @@ async def reprint(request: Request):
 
 @app.get("/uploads", response_class=HTMLResponse)
 def uploads(request: Request):
-    user = require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         items = service.list_uploads(conn, limit=50)
-    return render(request, "uploads.html", user, uploads=items)
+    return render(request, "uploads.html", uploads=items)
 
 
 @app.post("/uploads")
 async def upload_files(request: Request, files: list[UploadFile] = File(...)):
-    user = require(request, *STAFF)
+    user = require_admin(request)
     ids = []
     for f in files:
         if not f.filename:
@@ -333,7 +374,7 @@ async def upload_files(request: Request, files: list[UploadFile] = File(...)):
 
 @app.get("/uploads/{upload_id}", response_class=HTMLResponse)
 def upload_detail(request: Request, upload_id: int):
-    user = require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         upload = conn.execute(
             "SELECT up.*, u.name AS user_name FROM uploads up LEFT JOIN users u ON u.id = up.user_id WHERE up.id = %s",
@@ -341,12 +382,12 @@ def upload_detail(request: Request, upload_id: int):
         ).fetchone()
     if not upload:
         return redirect("/uploads", request, "Загрузка не найдена", error=True)
-    return render(request, "upload.html", user, upload=upload)
+    return render(request, "upload.html", upload=upload)
 
 
 @app.post("/uploads/{upload_id}/confirm")
 def upload_confirm(request: Request, upload_id: int):
-    require(request, *STAFF)
+    require_admin(request)
     try:
         added = service.confirm_upload(upload_id)
     except service.ServiceError as e:
@@ -356,7 +397,7 @@ def upload_confirm(request: Request, upload_id: int):
 
 @app.post("/uploads/{upload_id}/cancel")
 def upload_cancel(request: Request, upload_id: int):
-    require(request, *STAFF)
+    require_admin(request)
     service.cancel_upload(upload_id)
     return redirect("/uploads", request, "Загрузка отменена")
 
@@ -365,7 +406,7 @@ def upload_cancel(request: Request, upload_id: int):
 
 @app.get("/stock", response_class=HTMLResponse)
 def stock(request: Request, q: str = "", low: int = 0):
-    user = require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         rows = service.stock_report(conn)
         threshold = service.min_stock(conn)
@@ -374,12 +415,12 @@ def stock(request: Request, q: str = "", low: int = 0):
     if low:
         rows = [r for r in rows if r["stock"] < threshold]
     low_count = sum(1 for r in rows if r["stock"] < threshold)
-    return render(request, "stock.html", user, rows=rows, q=q, low=low, threshold=threshold, low_count=low_count)
+    return render(request, "stock.html", rows=rows, q=q, low=low, threshold=threshold, low_count=low_count)
 
 
 @app.post("/stock/threshold")
 def stock_threshold(request: Request, value: str = Form(...)):
-    require(request, *STAFF)
+    require_admin(request)
     number = _int(value)
     if number is None or number < 0:
         return redirect("/stock", request, "Порог должен быть числом", error=True)
@@ -407,7 +448,7 @@ def _xlsx(headers, rows, filename):
 
 @app.get("/stock.xlsx")
 def stock_xlsx(request: Request):
-    require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         rows = service.stock_report(conn)
     return _xlsx(
@@ -420,7 +461,7 @@ def stock_xlsx(request: Request):
 @app.get("/journal", response_class=HTMLResponse)
 def journal(request: Request, q: str = "", user_id: str = "", date_from: str = "", date_to: str = "",
             kind: str = ""):
-    user = require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         jobs = service.list_jobs(conn, q, _int(user_id), _date(date_from), _date(date_to),
                                  kind or None, limit=500)
@@ -431,7 +472,7 @@ def journal(request: Request, q: str = "", user_id: str = "", date_from: str = "
     entries.sort(key=lambda e: e["at"], reverse=True)
     total_printed = sum(j["qty"] for j in jobs if j["kind"] == "print")
     total_reprinted = sum(j["qty"] for j in jobs if j["kind"] == "reprint")
-    return render(request, "journal.html", user, entries=entries, q=q, user_id=_int(user_id),
+    return render(request, "journal.html", entries=entries, q=q, user_id=_int(user_id),
                   date_from=date_from, date_to=date_to, kind=kind, users=users,
                   total_printed=total_printed, total_reprinted=total_reprinted)
 
@@ -439,7 +480,7 @@ def journal(request: Request, q: str = "", user_id: str = "", date_from: str = "
 @app.get("/journal.xlsx")
 def journal_xlsx(request: Request, q: str = "", user_id: str = "", date_from: str = "", date_to: str = "",
                  kind: str = ""):
-    require(request, *STAFF)
+    require_admin(request)
     with db.pool.connection() as conn:
         jobs = service.list_jobs(conn, q, _int(user_id), _date(date_from), _date(date_to),
                                  kind or None, limit=100000)
@@ -456,11 +497,13 @@ def journal_xlsx(request: Request, q: str = "", user_id: str = "", date_from: st
 
 @app.get("/users", response_class=HTMLResponse)
 def users_page(request: Request):
-    user = require(request, "admin")
+    require_admin(request)
     with db.pool.connection() as conn:
-        users = conn.execute("SELECT * FROM users ORDER BY active DESC, role, name").fetchall()
+        users = conn.execute(
+            "SELECT * FROM users WHERE role IN ('admin', 'packer') ORDER BY active DESC, role, name"
+        ).fetchall()
     new_code = request.session.get("new_code")
-    return render(request, "users.html", user, users=users, new_code=new_code)
+    return render(request, "users.html", users=users, new_code=new_code)
 
 
 def _valid_code(code):
@@ -469,41 +512,46 @@ def _valid_code(code):
 
 def _unique_error(e):
     constraint = getattr(e.diag, "constraint_name", "") or ""
-    return "Такой личный код уже есть у другого сотрудника" if "code" in constraint else "Такой логин уже есть"
+    return "Такой личный код уже есть у другого сотрудника" if "code" in constraint else "Такой сотрудник уже есть"
+
+
+def _password_taken(conn, password, except_id=None):
+    admin = auth.admin_by_password(conn, password)
+    return admin is not None and admin["id"] != except_id
 
 
 @app.post("/users")
 def create_user(request: Request, name: str = Form(...), role: str = Form(...),
-                login: str = Form(""), password: str = Form(""), personal_code: str = Form("")):
-    require(request, "admin")
-    name, login, personal_code = name.strip(), login.strip(), personal_code.strip()
+                password: str = Form(""), personal_code: str = Form("")):
+    require_admin(request)
+    name, personal_code = name.strip(), personal_code.strip()
     if role not in auth.ROLE_NAMES or not name:
         return redirect("/users", request, "Укажите имя и роль", error=True)
-    needs_login = role in ("admin", "operator", "station")
-    if needs_login and (not login or len(password) < 8):
-        return redirect("/users", request, "Для этой роли нужен логин и пароль не короче 8 символов", error=True)
+    is_admin = role == "admin"
+    if is_admin and len(password) < 8:
+        return redirect("/users", request, "Для администратора нужен пароль не короче 8 символов", error=True)
     if personal_code and not _valid_code(personal_code):
         return redirect("/users", request, "Личный код должен быть не короче 4 символов", error=True)
-    code = None
-    if role != "station":
-        code = personal_code or auth.new_personal_code()
+    code = personal_code or auth.new_personal_code()
     try:
         with db.tx() as conn:
+            if is_admin and _password_taken(conn, password):
+                return redirect("/users", request, "Такой пароль уже у другого администратора, придумайте другой",
+                                error=True)
             user_id = conn.execute(
-                "INSERT INTO users (name, role, login, password_hash, code_hash) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (name, role, login or None, auth.hash_password(password) if needs_login else None,
-                 auth.hash_code(code) if code else None),
+                "INSERT INTO users (name, role, password_hash, code_hash) VALUES (%s, %s, %s, %s) RETURNING id",
+                (name, role, auth.hash_password(password) if is_admin else None, auth.hash_code(code)),
             ).fetchone()["id"]
     except UniqueViolation as e:
         return redirect("/users", request, _unique_error(e), error=True)
-    if code and not personal_code:
+    if not personal_code:
         request.session["new_code"] = {"user_id": user_id, "name": name, "code": code}
     return redirect("/users", request, f"Сотрудник «{name}» добавлен")
 
 
 @app.post("/users/{user_id}/code")
 def reset_code(request: Request, user_id: int, personal_code: str = Form("")):
-    require(request, "admin")
+    require_admin(request)
     personal_code = personal_code.strip()
     if personal_code and not _valid_code(personal_code):
         return redirect("/users", request, "Личный код должен быть не короче 4 символов", error=True)
@@ -511,7 +559,7 @@ def reset_code(request: Request, user_id: int, personal_code: str = Form("")):
     try:
         with db.tx() as conn:
             row = conn.execute(
-                "UPDATE users SET code_hash = %s WHERE id = %s AND role <> 'station' RETURNING name",
+                "UPDATE users SET code_hash = %s WHERE id = %s RETURNING name",
                 (auth.hash_code(code), user_id),
             ).fetchone()
     except UniqueViolation as e:
@@ -561,7 +609,7 @@ def _read_people(filename, content):
 
 @app.post("/users/import")
 async def import_users(request: Request, file: UploadFile = File(...)):
-    require(request, "admin")
+    require_admin(request)
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".csv")):
         return redirect("/users", request, "Нужен файл Excel (.xlsx) или CSV", error=True)
     try:
@@ -591,8 +639,8 @@ async def import_users(request: Request, file: UploadFile = File(...)):
 
 @app.post("/users/{user_id}/toggle")
 def toggle_user(request: Request, user_id: int, field: str = Form(...)):
-    current = require(request, "admin")
-    if field not in ("active", "can_reprint"):
+    current = require_admin(request)
+    if field != "active":
         return redirect("/users")
     if field == "active" and user_id == current["id"]:
         return redirect("/users", request, "Нельзя отключить самого себя", error=True)
@@ -603,18 +651,21 @@ def toggle_user(request: Request, user_id: int, field: str = Form(...)):
 
 @app.post("/users/{user_id}/password")
 def set_password(request: Request, user_id: int, password: str = Form(...)):
-    require(request, "admin")
+    require_admin(request)
     if len(password) < 8:
         return redirect("/users", request, "Пароль не короче 8 символов", error=True)
     with db.tx() as conn:
-        conn.execute("UPDATE users SET password_hash = %s WHERE id = %s AND login IS NOT NULL",
+        if _password_taken(conn, password, except_id=user_id):
+            return redirect("/users", request, "Такой пароль уже у другого администратора, придумайте другой",
+                            error=True)
+        conn.execute("UPDATE users SET password_hash = %s WHERE id = %s AND role = 'admin'",
                      (auth.hash_password(password), user_id))
     return redirect("/users", request, "Пароль изменён")
 
 
 @app.get("/users/badge.pdf")
 def badge(request: Request):
-    require(request, "admin")
+    require_admin(request)
     new_code = request.session.get("new_code")
     if not new_code:
         return redirect("/users", request, "Бейдж можно напечатать сразу после выдачи кода", error=True)
@@ -624,9 +675,41 @@ def badge(request: Request):
 
 @app.post("/users/badge/done")
 def badge_done(request: Request):
-    require(request, "admin")
+    require_admin(request)
     request.session.pop("new_code", None)
     return redirect("/users")
+
+
+# ---------- computers ----------
+
+@app.get("/devices", response_class=HTMLResponse)
+def devices_page(request: Request):
+    require_admin(request)
+    with db.pool.connection() as conn:
+        devices = conn.execute(
+            "SELECT d.*, u.name AS admin_name FROM devices d LEFT JOIN users u ON u.id = d.approved_by "
+            "ORDER BY d.active DESC, d.last_seen_at DESC NULLS LAST"
+        ).fetchall()
+    return render(request, "devices.html", devices=devices, this_id=request.state.device["id"])
+
+
+@app.post("/devices/{device_id}/toggle")
+def toggle_device(request: Request, device_id: int):
+    require_admin(request)
+    if device_id == request.state.device["id"]:
+        return redirect("/devices", request, "Нельзя отключить компьютер, за которым вы сейчас работаете", error=True)
+    with db.tx() as conn:
+        conn.execute("UPDATE devices SET active = NOT active WHERE id = %s", (device_id,))
+    return redirect("/devices")
+
+
+@app.post("/devices/{device_id}/name")
+def rename_device(request: Request, device_id: int, name: str = Form(...)):
+    require_admin(request)
+    if name.strip():
+        with db.tx() as conn:
+            conn.execute("UPDATE devices SET name = %s WHERE id = %s", (name.strip()[:60], device_id))
+    return redirect("/devices")
 
 
 @app.get("/health")

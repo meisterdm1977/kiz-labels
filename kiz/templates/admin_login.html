@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Администратор{% endblock %}
+{% block content %}
+<form method="post" action="/admin" class="card narrow">
+  <h1>Вход администратора</h1>
+  <input type="hidden" name="next" value="{{ next }}">
+  <label>Пароль <input name="password" type="password" required autofocus autocomplete="current-password"></label>
+  <button class="primary">Войти</button>
+  <p class="muted">Через 15 минут без действий вход закроется сам.</p>
+</form>
+{% endblock %}

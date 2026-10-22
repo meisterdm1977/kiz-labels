@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Компьютеры{% endblock %}
+{% block content %}
+<h1>Компьютеры</h1>
+<p class="muted">Сайт открывается только на этих компьютерах. Чтобы добавить новый, откройте на нём сайт и введите пароль администратора.
+  Отключённый компьютер сразу теряет доступ.</p>
+<table class="list">
+  <thead><tr><th>Название</th><th>Разрешил</th><th>Когда разрешён</th><th>Последний вход</th><th>Адрес</th><th>Состояние</th></tr></thead>
+  <tbody>
+  {% for d in devices %}
+  <tr class="{{ 'muted' if not d.active }}">
+    <td><details class="inline"><summary>{{ d.name }}{% if d.id == this_id %} (этот){% endif %}</summary>
+        <form method="post" action="/devices/{{ d.id }}/name"><input name="name" value="{{ d.name }}" maxlength="60" required><button>Сохранить</button></form>
+      </details></td>
+    <td>{{ d.admin_name or '' }}</td><td>{{ d.created_at|local }}</td><td>{{ d.last_seen_at|local }}</td>
+    <td class="mono">{{ d.last_ip or '' }}</td>
+    <td>{% if d.id == this_id %}работает{% else %}
+      <form method="post" action="/devices/{{ d.id }}/toggle" class="inline"
+            {% if d.active %}data-confirm="Отключить «{{ d.name }}»? На нём сразу закроется доступ."{% endif %}>
+        <button class="link">{{ 'работает, отключить' if d.active else 'отключён, включить' }}</button></form>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

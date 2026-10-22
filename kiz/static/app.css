@@ -12,6 +12,7 @@ h1 { font-size: 24px; margin: 8px 0 12px; } h2 { font-size: 19px; margin: 20px 0
 .top .brand { font-weight: 700; color: #fff; }
 .who { display: flex; gap: 10px; align-items: center; }
 .who .link { color: #dbe3f0; }
+.top a.admin-btn { border: 1px solid #4b5568; border-radius: 6px; padding: 4px 12px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 12px 0; }
 .card.narrow { max-width: 380px; margin: 60px auto; }
 .card.highlight { border-color: var(--accent); }
