@@ -44,6 +44,7 @@ async def lifespan(app):
     db.init()
     auth.ensure_admin()
     service.recover_interrupted_uploads()
+    service.rerender_old_layouts()
     task = asyncio.create_task(_cleanup_loop())
     yield
     task.cancel()
@@ -409,9 +410,13 @@ def upload_detail(request: Request, upload_id: int):
             "SELECT up.*, u.name AS user_name FROM uploads up LEFT JOIN users u ON u.id = up.user_id WHERE up.id = %s",
             (upload_id,),
         ).fetchone()
+        usage = service.upload_usage(conn, upload_id) if upload else None
+        if upload and upload["deleted_by"]:
+            upload["deleted_by_name"] = conn.execute(
+                "SELECT name FROM users WHERE id = %s", (upload["deleted_by"],)).fetchone()["name"]
     if not upload:
         return redirect("/uploads", request, "Загрузка не найдена", error=True)
-    return render(request, "upload.html", upload=upload)
+    return render(request, "upload.html", upload=upload, usage=usage)
 
 
 @app.post("/uploads/{upload_id}/confirm")
@@ -429,6 +434,27 @@ def upload_cancel(request: Request, upload_id: int):
     require_admin(request)
     service.cancel_upload(upload_id)
     return redirect("/uploads", request, "Загрузка отменена")
+
+
+@app.post("/uploads/{upload_id}/delete")
+def upload_delete(request: Request, upload_id: int, password: str = Form("")):
+    admin = require_admin(request)
+    with db.pool.connection() as conn:
+        printed = service.upload_usage(conn, upload_id)["printed"]
+    if printed:
+        # Printed codes take their history with them, so the administrator confirms with the password.
+        checked, error = _check_admin_password(request, password)
+        if error or checked["id"] != admin["id"]:
+            return redirect(f"/uploads/{upload_id}", request, (error or "Неверный пароль") + ". Загрузка не удалена.",
+                            error=True)
+    try:
+        usage = service.delete_upload(upload_id, admin["id"], allow_printed=bool(printed))
+    except service.ServiceError as e:
+        return redirect(f"/uploads/{upload_id}", request, str(e), error=True)
+    text = f"Загрузка №{upload_id} удалена: кодов из остатка {usage['stock']}"
+    if usage["printed"]:
+        text += f", напечатанных {usage['printed']}"
+    return redirect("/uploads", request, text + ".")
 
 
 # ---------- stock and journal ----------
@@ -498,6 +524,7 @@ def journal(request: Request, q: str = "", user_id: str = "", date_from: str = "
         users = conn.execute("SELECT id, name FROM users WHERE code_hash IS NOT NULL ORDER BY name").fetchall()
     entries = [{"at": j["created_at"], "type": j["kind"], "row": j} for j in jobs]
     entries += [{"at": u["created_at"], "type": "upload", "row": u} for u in uploads]
+    entries += [{"at": u["deleted_at"], "type": "upload_deleted", "row": u} for u in uploads if u["deleted_at"]]
     entries.sort(key=lambda e: e["at"], reverse=True)
     total_printed = sum(j["qty"] for j in jobs if j["kind"] == "print")
     total_reprinted = sum(j["qty"] for j in jobs if j["kind"] == "reprint")

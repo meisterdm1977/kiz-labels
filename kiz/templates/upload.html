@@ -10,6 +10,9 @@
     <p>Файл обрабатывается: читаем коды и готовим этикетки. Обычно до минуты на 300 этикеток. Страница обновится сама.</p>
   {% elif u.status == 'failed' %}
     <p class="flash error">{{ u.error }}</p>
+  {% elif u.status == 'deleted' %}
+    <p class="flash error">Удалена {{ u.deleted_at|local }}{% if u.deleted_by_name %}, удалил(а) {{ u.deleted_by_name }}{% endif %}.
+      Кодов убрано из остатка: {{ u.summary.deleted_stock or 0 }}{% if u.summary.deleted_printed %}, напечатанных вместе с историей: {{ u.summary.deleted_printed }}{% endif %}.</p>
   {% endif %}
   {% if u.summary %}
     {% set s = u.summary %}
@@ -33,9 +36,27 @@
     <form method="post" action="/uploads/{{ u.id }}/confirm" data-once><button class="primary big" {{ 'disabled' if not u.summary.new }}>Добавить {{ u.summary.new }} шт. в хранилище</button></form>
     <form method="post" action="/uploads/{{ u.id }}/cancel"><button>Отменить</button></form>
   </div>
-  {% elif u.status == 'failed' %}
-  <form method="post" action="/uploads/{{ u.id }}/cancel"><button>Убрать из списка</button></form>
   {% endif %}
 </div>
+{% if u.status not in ('processing', 'deleted') %}
+<div class="card danger" id="delete">
+  <h2>Удалить загрузку</h2>
+  {% if usage.printed %}
+  <p class="flash error"><b>Будет удалено {{ usage.printed }} напечатанных кодов и их история в «Архиве» и «Журнале».</b>
+    {% if usage.stock %}Ещё {{ usage.stock }} кодов уберутся из остатка.{% endif %} Отменить это нельзя.</p>
+  <form method="post" action="/uploads/{{ u.id }}/delete" data-once>
+    <label>Пароль администратора для подтверждения
+      <input type="password" name="password" required autocomplete="off">
+    </label>
+    <button class="danger">Удалить загрузку и напечатанные коды</button>
+  </form>
+  {% else %}
+  <p>Удалится файл{% if usage.stock %} и {{ usage.stock }} кодов из остатка{% endif %}. Товар, у которого не останется кодов, пропадёт из поиска.</p>
+  <form method="post" action="/uploads/{{ u.id }}/delete" data-confirm="Удалить загрузку №{{ u.id }}?">
+    <button class="danger">Удалить загрузку</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
 {% if u.status == 'processing' %}<script>setTimeout(() => location.reload(), 3000)</script>{% endif %}
 {% endblock %}

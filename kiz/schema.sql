@@ -90,3 +90,10 @@ UPDATE users SET role = 'packer', login = NULL, password_hash = NULL WHERE role 
 
 -- Personal codes are not secret (they only identify who printed), so they are kept readable for the staff list.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_code text;
+
+-- A deleted upload stays in the list and the journal as a record of who deleted it; its codes are gone.
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id);
+ALTER TABLE uploads DROP CONSTRAINT IF EXISTS uploads_status_check;
+ALTER TABLE uploads ADD CONSTRAINT uploads_status_check
+    CHECK (status IN ('processing', 'ready', 'failed', 'added', 'cancelled', 'deleted'));

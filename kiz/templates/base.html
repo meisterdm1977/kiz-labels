@@ -7,34 +7,42 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+{% set sections = [
+  ("/pack", "Печать", "print"), ("/archive", "Архив", "archive"), ("/uploads", "Загрузка", "upload"),
+  ("/stock", "Остатки", "stock"), ("/journal", "Журнал", "journal"), ("/users", "Сотрудники", "people"),
+  ("/devices", "Компьютеры", "computer")] if admin else [("/pack", "Печать", "print")] %}
+{% set path = request.url.path %}
+{% set current = namespace(title="Этикетки ЧЗ") %}
+{% for url, name, icon in sections %}{% if path.startswith(url) or (url == "/pack" and path.startswith("/jobs")) %}{% set current.title = name %}{% endif %}{% endfor %}
+<div class="app">
 {% if device %}
-<header class="top">
-  <nav>
-    <a href="/pack" class="brand">Этикетки ЧЗ</a>
-    <a href="/pack">Печать</a>
+<nav class="panel">
+  <a href="/pack" class="panel-brand">Этикетки ЧЗ</a>
+  {% for url, name, icon in sections %}
+  <a href="{{ url }}" class="{{ 'on' if current.title == name }}">{% include "_icons.html" %}<span>{{ name }}</span></a>
+  {% endfor %}
+  <div class="panel-bottom">
     {% if admin %}
-    <a href="/archive">Архив</a>
-    <a href="/uploads">Загрузка</a>
-    <a href="/stock">Остатки</a>
-    <a href="/journal">Журнал</a>
-    <a href="/users">Сотрудники</a>
-    <a href="/devices">Компьютеры</a>
+    <form method="post" action="/admin/logout">
+      <div class="muted">{{ admin.name }}</div>
+      <button>Выйти</button>
+    </form>
+    {% else %}
+    <a href="/admin" class="btn">Администратор</a>
     {% endif %}
-  </nav>
-  {% if admin %}
-  <form method="post" action="/admin/logout" class="who">
-    <span>{{ admin.name }}</span>
-    <button class="link">Выйти</button>
-  </form>
-  {% else %}
-  <a href="/admin" class="who admin-btn">Администратор</a>
-  {% endif %}
-</header>
+  </div>
+</nav>
+{% endif %}
+<div class="work">
+{% if device %}
+<div class="titlebar"><b>{{ current.title }}</b><span>{{ 'Режим администратора' if admin else 'Компьютер: ' ~ device.name }}</span></div>
 {% endif %}
 <main>
 {% if flash %}<div class="flash {{ 'error' if flash.error }}">{{ flash.text }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>
+</div>
+</div>
 <script src="/static/app.js"></script>
 {% block scripts %}{% endblock %}
 </body>

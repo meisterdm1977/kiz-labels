@@ -63,3 +63,19 @@ def test_long_texts_shrink_instead_of_being_cut(tmp_path):
     _fit_texts(wb)
     assert 4.5 <= ws["D17"].font.sz < 11  # the long article is made smaller to fit
     assert ws["D21"].font.sz == 11  # a short text keeps its size
+
+
+def test_long_field_values_take_the_whole_width(tmp_path):
+    import openpyxl
+    from kiz.labels import _widen_fields
+    path = tmp_path / "layout.xlsx"
+    make_layout(path, 1, article="Костюм спортивный женский оверсайз 1234 тёмно-зелёный")
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    for label, value in (("B17:C17", "D17:E17"), ("B19:C19", "D19:E19")):
+        ws.merge_cells(label)
+        ws.merge_cells(value)
+    _widen_fields(wb)
+    assert ws["B17"].value == "Артикул: Костюм спортивный женский оверсайз 1234 тёмно-зелёный"
+    assert ws["B19"].value == "Размер: 40" and ws["D19"].value is None
+    assert "B17:E17" in [str(r) for r in ws.merged_cells.ranges]

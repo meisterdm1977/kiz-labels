@@ -315,3 +315,54 @@ def test_product_suggestions_forgive_typos(client):
     from fastapi.testclient import TestClient
     from kiz.main import app
     assert TestClient(app).get("/pack/suggest", params={"q": "шорты"}, follow_redirects=False).status_code == 303
+
+
+def test_deleting_uploads(client, tmp_path):
+    login(client)
+    anna = create_packer(client, "Борис")
+    path = tmp_path / "a.xlsx"
+    make_layout(path, 4, ean="2047362900011", seed=7)
+    printed_upload, _ = upload(client, path)
+    client.post(f"/uploads/{printed_upload}/confirm")
+    product_id = int(client.get("/pack", params={"q": "2047362900011"}, follow_redirects=False)
+                     .headers["location"].rsplit("/", 1)[1])
+    client.post("/print", data={"product_id": product_id, "qty": "1", "personal_code": anna})
+
+    other = tmp_path / "b.xlsx"
+    make_layout(other, 3, ean="2047362900028", size="42", seed=8)
+    fresh_upload, _ = upload(client, other, name="Шорты 02 коричневый - 42-3шт.xlsx")
+    client.post(f"/uploads/{fresh_upload}/confirm")
+    assert stock_of("2047362900028") == 3
+
+    # Nothing printed: a plain confirmation is enough, the product leaves the search.
+    assert "Удалить загрузку?" not in client.get(f"/uploads/{printed_upload}").text
+    r = client.post(f"/uploads/{fresh_upload}/delete", follow_redirects=False)
+    assert r.headers["location"] == "/uploads"
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM codes WHERE upload_id = %s", (fresh_upload,)).fetchone()["n"] == 0
+        assert not conn.execute("SELECT 1 FROM products WHERE ean = '2047362900028'").fetchone()
+
+    # Printed codes: the page warns, and only the administrator's password deletes them with their history.
+    page = client.get(f"/uploads/{printed_upload}").text
+    assert "Будет удалено 1 напечатанных кодов" in page
+    client.post(f"/uploads/{printed_upload}/delete", data={"password": "wrong"})
+    assert stock_of("2047362900011") == 3
+    client.post(f"/uploads/{printed_upload}/delete", data={"password": "admin-password"})
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM codes WHERE upload_id = %s", (printed_upload,)).fetchone()["n"] == 0
+        assert conn.execute("SELECT count(*) AS n FROM print_jobs WHERE product_id = %s", (product_id,)).fetchone()["n"] == 0
+        assert conn.execute("SELECT status FROM uploads WHERE id = %s", (printed_upload,)).fetchone()["status"] == "deleted"
+    journal = client.get("/journal").text
+    assert journal.count("Удаление загрузки") == 2
+    assert "удалено" in client.get("/uploads").text
+
+
+def test_side_menu_shows_sections_by_role(client):
+    approve(client)
+    client.post("/admin/logout")
+    page = client.get("/pack").text
+    assert 'class="panel"' in page and "Администратор" in page and "/journal" not in page
+    login(client)
+    page = client.get("/journal").text
+    assert all(f'href="{url}"' in page for url in ("/pack", "/archive", "/uploads", "/stock", "/journal", "/users", "/devices"))
+    assert 'class="on"><svg' in page and "Выйти" in page

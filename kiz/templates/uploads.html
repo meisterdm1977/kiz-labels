@@ -11,14 +11,15 @@
 </form>
 <h2>Последние загрузки</h2>
 <table class="list">
-  <thead><tr><th>№</th><th>Когда</th><th>Кто</th><th>Файл</th><th>Состояние</th></tr></thead>
+  <thead><tr><th>№</th><th>Когда</th><th>Кто</th><th>Файл</th><th>Состояние</th><th></th></tr></thead>
   <tbody>
   {% for u in uploads %}
   <tr class="rowlink" data-href="/uploads/{{ u.id }}"><td><a href="/uploads/{{ u.id }}">{{ u.id }}</a></td><td>{{ u.created_at|local }}</td><td>{{ u.user_name or '' }}</td>
     <td>{{ u.filename }}</td>
-    <td>{% include "_upload_status.html" %}</td></tr>
+    <td>{% include "_upload_status.html" %}</td>
+    <td>{% if u.status not in ('processing', 'deleted') %}<a href="/uploads/{{ u.id }}#delete" class="bad">Удалить</a>{% endif %}</td></tr>
   {% else %}
-  <tr><td colspan="5" class="muted">Загрузок пока нет</td></tr>
+  <tr><td colspan="6" class="muted">Загрузок пока нет</td></tr>
   {% endfor %}
   </tbody>
 </table>

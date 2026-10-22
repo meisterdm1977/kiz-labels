@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from psycopg.types.json import Jsonb
 
 from . import config, db, small_label
-from .labels import GS, Label, LayoutError, code_prefix, from_ru_layout, read_workbook, render_pdf
+from .labels import GS, LAYOUT_VERSION, Label, LayoutError, code_prefix, from_ru_layout, read_workbook, render_pdf
 
 log = logging.getLogger("kiz")
 
@@ -83,6 +83,7 @@ def process_upload(upload_id):
     try:
         labels = read_workbook(folder / "source.xlsx")
         render_pdf(folder / "source.xlsx", folder / "labels.pdf", len(labels))
+        (folder / "layout").write_text(LAYOUT_VERSION)
         (folder / "labels.json").write_text(
             json.dumps([asdict(l) for l in labels], ensure_ascii=False), encoding="utf-8"
         )
@@ -161,6 +162,85 @@ def cancel_upload(upload_id):
         )
     if cur.rowcount:
         shutil.rmtree(upload_dir(upload_id), ignore_errors=True)
+
+
+def upload_usage(conn, upload_id):
+    """How many codes of an upload are still in stock and how many were already printed."""
+    return conn.execute(
+        """
+        SELECT count(*) FILTER (WHERE status = 'stock') AS stock,
+               count(*) FILTER (WHERE status = 'printed') AS printed
+        FROM codes WHERE upload_id = %s
+        """,
+        (upload_id,),
+    ).fetchone()
+
+
+def delete_upload(upload_id, admin_id, allow_printed=False):
+    """Removes everything an upload brought: its codes, their prints in the archive and journal,
+    products left without codes, and its files. The upload itself stays as a «deleted» record."""
+    with db.tx() as conn:
+        upload = conn.execute("SELECT * FROM uploads WHERE id = %s FOR UPDATE", (upload_id,)).fetchone()
+        if not upload or upload["status"] == "deleted":
+            raise ServiceError("Загрузка уже удалена.")
+        if upload["status"] == "processing":
+            raise ServiceError("Файл ещё обрабатывается. Удалить можно, когда обработка закончится.")
+        usage = upload_usage(conn, upload_id)
+        if usage["printed"] and not allow_printed:
+            raise ServiceError("Из этой загрузки уже печатали. Для удаления нужен пароль администратора.")
+        products = [r["product_id"] for r in conn.execute(
+            "SELECT DISTINCT product_id FROM codes WHERE upload_id = %s", (upload_id,))]
+        jobs = [r["job_id"] for r in conn.execute(
+            "SELECT DISTINCT jc.job_id FROM print_job_codes jc JOIN codes c ON c.id = jc.code_id "
+            "WHERE c.upload_id = %s", (upload_id,))]
+        conn.execute("DELETE FROM codes WHERE upload_id = %s", (upload_id,))
+        if jobs:
+            # A print made only of these codes disappears; a mixed reprint keeps the other codes.
+            conn.execute(
+                "DELETE FROM print_jobs j WHERE j.id = ANY(%s) "
+                "AND NOT EXISTS (SELECT 1 FROM print_job_codes jc WHERE jc.job_id = j.id)", (jobs,))
+            conn.execute(
+                "UPDATE print_jobs j SET qty = (SELECT count(*) FROM print_job_codes jc WHERE jc.job_id = j.id) "
+                "WHERE j.id = ANY(%s)", (jobs,))
+        if products:
+            conn.execute(
+                "DELETE FROM products p WHERE p.id = ANY(%s) "
+                "AND NOT EXISTS (SELECT 1 FROM codes c WHERE c.product_id = p.id) "
+                "AND NOT EXISTS (SELECT 1 FROM print_jobs j WHERE j.product_id = p.id)", (products,))
+        summary = dict(upload["summary"] or {}, deleted_stock=usage["stock"], deleted_printed=usage["printed"],
+                       status_before=upload["status"])
+        conn.execute(
+            "UPDATE uploads SET status = 'deleted', deleted_at = now(), deleted_by = %s, summary = %s WHERE id = %s",
+            (admin_id, Jsonb(summary), upload_id),
+        )
+    shutil.rmtree(upload_dir(upload_id), ignore_errors=True)
+    return usage
+
+
+def rerender_old_layouts():
+    """Uploads whose print pages were made by an older version get them made again, one by one."""
+    with db.pool.connection() as conn:
+        ids = [r["id"] for r in conn.execute(
+            "SELECT DISTINCT upload_id AS id FROM codes WHERE status = 'stock' "
+            "UNION SELECT id FROM uploads WHERE status = 'ready'")]
+    for upload_id in sorted(ids):
+        folder = upload_dir(upload_id)
+        marker = folder / "layout"
+        if (folder / "source.xlsx").exists() and (not marker.exists() or marker.read_text() != LAYOUT_VERSION):
+            _worker.submit(_rerender, upload_id)
+
+
+def _rerender(upload_id):
+    folder = upload_dir(upload_id)
+    try:
+        pages = len(json.loads((folder / "labels.json").read_text(encoding="utf-8")))
+        tmp = folder / "labels.new.pdf"
+        render_pdf(folder / "source.xlsx", tmp, pages)
+        tmp.replace(folder / "labels.pdf")  # printing never sees a half-written file
+        (folder / "layout").write_text(LAYOUT_VERSION)
+        log.info("upload %s: print pages made again", upload_id)
+    except Exception:
+        log.exception("upload %s: print pages not made again, the old ones stay", upload_id)
 
 
 def recover_interrupted_uploads():
@@ -433,7 +513,8 @@ def list_jobs(conn, query="", user_id=None, date_from=None, date_to=None, kind=N
 
 def list_uploads(conn, date_from=None, date_to=None, limit=200):
     start, end = _day_bounds(date_from, date_to)
-    sql = ["SELECT up.*, u.name AS user_name FROM uploads up LEFT JOIN users u ON u.id = up.user_id WHERE true"]
+    sql = ["SELECT up.*, u.name AS user_name, d.name AS deleted_by_name FROM uploads up "
+           "LEFT JOIN users u ON u.id = up.user_id LEFT JOIN users d ON d.id = up.deleted_by WHERE true"]
     args = []
     if start:
         sql.append("AND up.created_at >= %s")

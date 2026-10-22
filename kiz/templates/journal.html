@@ -24,9 +24,12 @@
   {% for e in entries %}{% set r = e.row %}
   <tr>
     <td>{{ e.at|local }}</td>
-    {% if e.type == 'upload' %}
+    {% if e.type == 'upload_deleted' %}
+      <td class="bad">Удаление загрузки</td><td>{{ r.deleted_by_name or '' }}</td><td><a href="/uploads/{{ r.id }}">{{ r.filename }}</a></td>
+      <td class="num">{{ (r.summary.deleted_stock or 0) + (r.summary.deleted_printed or 0) }}</td>
+    {% elif e.type == 'upload' %}
       <td>Загрузка</td><td>{{ r.user_name or '' }}</td><td><a href="/uploads/{{ r.id }}">{{ r.filename }}</a></td>
-      <td class="num">{{ r.summary.added if r.status == 'added' else '' }}</td>
+      <td class="num">{{ r.summary.added if r.summary and r.summary.added is defined else '' }}</td>
     {% else %}
       <td>{{ 'Печать' if e.type == 'print' else 'Повторная печать' }}</td><td>{{ r.user_name }}</td>
       <td><a href="/archive/job/{{ r.id }}">{{ r.article or 'Разные товары' }} {% if r.size %}р. {{ r.size }}{% endif %}</a></td>

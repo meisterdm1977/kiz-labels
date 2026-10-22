@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.styles import Alignment, Font
 from PIL import Image, ImageFont, ImageOps
 from pylibdmtx.pylibdmtx import decode as dmtx_decode
 from pypdf import PdfReader, PdfWriter
@@ -191,13 +191,73 @@ def _wrap(text, font, width):
     return lines
 
 
+FIELD_NAMES = ("пол", "артикул", "размер", "цвет", "состав")
+LAYOUT_VERSION = "2"  # bump when the printed page changes, so old uploads are rendered again
+
+
+def _merged_range(ws, cell):
+    for merged in ws.merged_cells.ranges:
+        if cell.coordinate in merged:
+            return merged
+    return None
+
+
+def _digit_width(wb):
+    # Column width is counted in widest digits of the workbook's default font, plus 5 px padding.
+    default = wb._fonts[0]
+    return _measure_font(bool(default.b), (default.sz or 11) * 96 / 72).getlength("0")
+
+
+def _field_rows(ws):
+    """(name cell, its range, value cell, its range) for Пол/Артикул/Размер/Цвет/Состав lines."""
+    for row in ws.iter_rows():
+        for label in row:
+            text = label.value.strip().lower() if isinstance(label.value, str) else ""
+            if not text.endswith(":") or text.rstrip(":").strip() not in FIELD_NAMES:
+                continue
+            label_range = _merged_range(ws, label)
+            label_end = label_range.max_col if label_range else label.column
+            value = next((c for c in row if c.column > label_end and isinstance(c.value, str) and c.value.strip()), None)
+            if value is not None:
+                yield label, label_range, value, _merged_range(ws, value)
+
+
+def _widen_fields(wb):
+    """In the 1С layout a field name («Артикул:») takes half the width and its value the other half,
+    so a long article or composition is cut. When a value does not fit, the lines become
+    «Артикул: value» across the whole width, starting where the name starts."""
+    digit = _digit_width(wb)
+    for ws in wb.worksheets:
+        fields = list(_field_rows(ws))
+        if not any(merged and not _cell_fits(ws, merged, value, digit, float(value.font.sz or 11))
+                   for _, _, value, merged in fields):
+            continue
+        for label, label_range, value, value_range in fields:
+            top = min(label_range.min_row if label_range else label.row, value_range.min_row if value_range else value.row)
+            bottom = max(label_range.max_row if label_range else label.row, value_range.max_row if value_range else value.row)
+            first = label_range.min_col if label_range else label.column
+            last = value_range.max_col if value_range else value.column
+            others = [ws.cell(r, c).value for r in range(top, bottom + 1) for c in range(first, last + 1)
+                      if (r, c) not in ((label.row, label.column), (value.row, value.column))]
+            if any(v not in (None, "") for v in others):
+                continue  # something else lives there; leave this line as 1С made it
+            text = f"{label.value.strip()} {value.value.strip()}"
+            style = value._style
+            for merged in (label_range, value_range):
+                if merged:
+                    ws.unmerge_cells(str(merged))
+            label.value = value.value = None
+            cell = ws.cell(top, first, text)
+            cell._style = style
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            ws.merge_cells(start_row=top, start_column=first, end_row=bottom, end_column=last)
+
+
 def _fit_texts(wb):
     """Text in a merged cell of the 1С layout is cut off when it is longer than the cell (a long
     article, a long composition). Shrink the font just enough to show it whole; text that already
     fits is left alone."""
-    default = wb._fonts[0]
-    # Column width is counted in widest digits of the workbook's default font, plus 5 px padding.
-    digit = _measure_font(bool(default.b), (default.sz or 11) * 96 / 72).getlength("0")
+    digit = _digit_width(wb)
     for ws in wb.worksheets:
         for merged in ws.merged_cells.ranges:
             cell = ws.cell(merged.min_row, merged.min_col)
@@ -205,24 +265,24 @@ def _fit_texts(wb):
                 _fit_cell(ws, merged, cell, digit)
 
 
-def _fit_cell(ws, merged, cell, digit):
-    width = sum(round((ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width or 8.43) * digit) + 5
-                for c in range(merged.min_col, merged.max_col + 1)) * 0.75 - 3
+def _cell_fits(ws, merged, cell, digit, size):
+    # A little narrower than measured: LibreOffice's text is not exactly as wide as ours.
+    width = (sum(round((ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width or 8.43) * digit) + 5
+                 for c in range(merged.min_col, merged.max_col + 1)) * 0.75 - 3) * 0.95
     height = sum(ws.row_dimensions[r].height or 15 for r in range(merged.min_row, merged.max_row + 1))
+    text = cell.value.strip()
+    font = _measure_font(bool(cell.font.b), size)
+    if not cell.alignment.wrap_text:
+        return all(font.getlength(line) <= width for line in text.split("\n"))
+    lines = _wrap(text, font, width)
+    if len(lines) <= len(text.split("\n")):
+        return True
+    return len(lines) * size * 1.35 <= height
+
+
+def _fit_cell(ws, merged, cell, digit):
     size = original = float(cell.font.sz or 11)
-    bold, text = bool(cell.font.b), cell.value.strip()
-    paragraphs = len(text.split("\n"))
-
-    def fits(size):
-        font = _measure_font(bold, size)
-        if not cell.alignment.wrap_text:
-            return all(font.getlength(line) <= width for line in text.split("\n"))
-        lines = _wrap(text, font, width)
-        if len(lines) <= paragraphs:
-            return True
-        return len(lines) * size * 1.3 <= height
-
-    while size > 4.5 and not fits(size):
+    while size > 4.5 and not _cell_fits(ws, merged, cell, digit, size):
         size -= 0.5
     if size != original:
         cell.font = Font(**{**_font_kwargs(cell.font), "sz": size})
@@ -238,6 +298,7 @@ def render_pdf(xlsx_path, out_pdf, expected_pages):
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "labels.xlsx"
         wb = openpyxl.load_workbook(xlsx_path)
+        _widen_fields(wb)
         _fit_texts(wb)
         wb.save(src)
         result = subprocess.run(
