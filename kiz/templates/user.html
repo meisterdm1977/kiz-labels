@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name }}{% endblock %}
+{% block content %}
+<p><a href="/users">← Все сотрудники</a></p>
+{% if new_code %}
+<div class="card highlight">
+  <h2>Новый личный код: <span class="mono big">{{ new_code.code }}</span></h2>
+  <p>Напечатайте бейдж на TSC и отдайте сотруднику.</p>
+  <div class="actions">
+    <a href="/users/badge.pdf" target="_blank" class="btn primary">Открыть бейдж для печати</a>
+    <form method="post" action="/users/badge/done"><button>Готово</button></form>
+  </div>
+</div>
+{% endif %}
+<div class="card">
+  <h1>{{ person.name }}</h1>
+  <p>{{ role_names[person.role] }} · код <span class="mono">{{ person.personal_code or 'не виден, загрузите список заново' }}</span>
+    · <b>{{ 'работает' if person.active else 'отключён' }}</b></p>
+</div>
+
+<div class="card">
+  <h2>{{ 'Отключить' if person.active else 'Включить' }}</h2>
+  <p class="muted">{{ 'Отключённый сотрудник не сможет печатать. Его история в журнале сохранится.' if person.active
+                     else 'Сотрудник снова сможет печатать со своим кодом.' }}</p>
+  <form method="post" action="/users/{{ person.id }}/toggle"
+        {% if person.active %}data-confirm="Отключить «{{ person.name }}»?"{% endif %}>
+    <input type="hidden" name="field" value="active">
+    <button>{{ 'Отключить сотрудника' if person.active else 'Включить сотрудника' }}</button>
+  </form>
+</div>
+
+<form method="post" action="/users/{{ person.id }}/code" class="card" data-confirm="Сменить личный код? Старый перестанет работать.">
+  <h2>Сменить код</h2>
+  <label>Новый код (если пусто, сервис придумает сам и предложит напечатать бейдж)
+    <input name="personal_code" autocomplete="off">
+  </label>
+  <button>Сменить код</button>
+</form>
+
+{% if person.role == 'admin' %}
+<form method="post" action="/users/{{ person.id }}/password" class="card">
+  <h2>Сменить пароль</h2>
+  <label>Новый пароль (не короче 8 символов) <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+  <button>Сменить пароль</button>
+</form>
+{% endif %}
+{% endblock %}

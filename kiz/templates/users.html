@@ -2,41 +2,24 @@
 {% block title %}Сотрудники{% endblock %}
 {% block content %}
 <h1>Сотрудники</h1>
-{% if new_code %}
-<div class="card highlight">
-  <h2>Личный код для «{{ new_code.name }}»: <span class="mono big">{{ new_code.code }}</span></h2>
-  <p>Код показывается один раз. Напечатайте бейдж на TSC и отдайте сотруднику.</p>
-  <div class="actions">
-    <a href="/users/badge.pdf" target="_blank" class="btn primary">Открыть бейдж для печати</a>
-    <form method="post" action="/users/badge/done"><button>Готово, скрыть код</button></form>
-  </div>
+<div class="suggest">
+  <input id="people-search" placeholder="Поиск по имени или коду" autocomplete="off" autofocus>
+  <ul id="people-suggest" class="suggest-list" hidden></ul>
 </div>
-{% endif %}
 <table class="list">
-  <thead><tr><th>Имя</th><th>Роль</th><th>Состояние</th><th></th></tr></thead>
+  <thead><tr><th>Имя</th><th>Роль</th><th>Код</th><th>Состояние</th></tr></thead>
   <tbody>
   {% for u in users %}
-  <tr class="{{ 'muted' if not u.active }}">
-    <td>{{ u.name }}</td><td>{{ role_names[u.role] }}</td>
-    <td><form method="post" action="/users/{{ u.id }}/toggle" class="inline"><input type="hidden" name="field" value="active">
-        <button class="link">{{ 'работает' if u.active else 'отключён' }}</button></form></td>
-    <td class="row-actions">
-      <details class="inline"><summary>сменить код</summary>
-        <form method="post" action="/users/{{ u.id }}/code" data-confirm="Сменить личный код? Старый перестанет работать.">
-          <input name="personal_code" autocomplete="off" placeholder="свой код или пусто для нового">
-          <button>Сменить</button>
-        </form>
-      </details>
-      {% if u.role == 'admin' %}
-      <details class="inline"><summary>пароль</summary>
-        <form method="post" action="/users/{{ u.id }}/password"><input name="password" type="password" minlength="8" required placeholder="новый пароль"><button>Сменить</button></form>
-      </details>
-      {% endif %}
-    </td>
+  <tr class="rowlink {{ 'muted' if not u.active }}" data-href="/users/{{ u.id }}">
+    <td><a href="/users/{{ u.id }}">{{ u.name }}</a></td><td>{{ role_names[u.role] }}</td>
+    <td class="mono">{{ u.personal_code or '' }}</td>
+    <td>{{ 'работает' if u.active else 'отключён' }}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+<p class="muted">Чтобы отключить сотрудника, сменить код или пароль, нажмите на его имя.
+  Код не виден у тех, кого добавили до этого обновления: загрузите их список заново, и коды появятся.</p>
 
 <form method="post" action="/users" class="card">
   <h2>Добавить</h2>
@@ -60,9 +43,13 @@
 <form method="post" action="/users/import" enctype="multipart/form-data" class="card">
   <h2>Загрузить упаковщиков списком</h2>
   <p class="muted">Файл Excel или CSV: в первом столбце имя, во втором личный код (можно с заголовками «Имя» и «Код»).
-    Чтобы коды с нулём в начале не потеряли ноль, сделайте столбец с кодами текстовым.</p>
+    Если сотрудник с таким именем уже есть, ему обновится код. Чтобы коды с нулём в начале не потеряли ноль,
+    сделайте столбец с кодами текстовым.</p>
   <input type="file" name="file" accept=".xlsx,.csv" required>
   <button class="primary">Загрузить</button>
 </form>
 {% endblock %}
-{% block scripts %}<script>toggleLoginFields();</script>{% endblock %}
+{% block scripts %}
+<script id="people-data" type="application/json">{{ people|tojson }}</script>
+<script>toggleLoginFields(); setupPeopleSearch();</script>
+{% endblock %}

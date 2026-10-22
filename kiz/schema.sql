@@ -87,3 +87,6 @@ CREATE TABLE IF NOT EXISTS devices (
 -- Two roles remain: the packing computer became an approved device, operators became packers.
 UPDATE users SET active = false WHERE role = 'station' AND active;
 UPDATE users SET role = 'packer', login = NULL, password_hash = NULL WHERE role = 'operator';
+
+-- Personal codes are not secret (they only identify who printed), so they are kept readable for the staff list.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS personal_code text;

@@ -38,8 +38,7 @@ def upload(client, path, name="Шорты 02 коричневый - 40-6шт.xls
 
 
 def create_packer(client, name):
-    client.post("/users", data={"name": name, "role": "packer"})
-    page = client.get("/users").text
+    page = client.post("/users", data={"name": name, "role": "packer"}).text
     client.post("/users/badge/done")
     return re.search(r'class="mono big">(\d{8})<', page).group(1)
 
@@ -267,3 +266,35 @@ def test_only_approved_computers_and_admin_sections(client):
     other = TestClient(app)
     login(other, "second-pass")
     auth.login_throttle.failures.clear()
+
+
+def test_staff_list_shows_codes_and_reimport_updates(client, tmp_path):
+    import openpyxl
+    login(client)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Имя", "Код"])
+    ws.append(["Зоя", "7701"])
+    path = tmp_path / "zoya.xlsx"
+    wb.save(path)
+    client.post("/users/import", files={"file": ("zoya.xlsx", path.read_bytes())})
+    with db.pool.connection() as conn:
+        zoya = conn.execute("SELECT * FROM users WHERE name = 'Зоя'").fetchone()
+        # A packer added before codes were kept readable: only the hash is known.
+        conn.execute("UPDATE users SET personal_code = NULL WHERE id = %s", (zoya["id"],))
+    assert "7701" not in client.get("/users").text
+
+    # Loading the same list again fills in the code instead of reporting a duplicate.
+    page = client.post("/users/import", files={"file": ("zoya.xlsx", path.read_bytes())}).text
+    assert "Обновлены коды у уже записанных: 1" in page and ">7701<" in page
+    with db.pool.connection() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM users WHERE name = 'Зоя'").fetchone()["n"] == 1
+
+    # The list is read-only; changes happen on the employee card.
+    card = client.get(f"/users/{zoya['id']}").text
+    assert "Отключить сотрудника" in card and "Сменить код" in card
+    page = client.post(f"/users/{zoya['id']}/toggle", data={"field": "active"}).text
+    assert "Сотрудник отключён" in page and "Включить сотрудника" in page
+    page = client.post(f"/users/{zoya['id']}/code", data={"personal_code": "7702"}).text
+    assert "Код изменён" in page and "7702" in page
+    assert client.get("/users/badge.pdf", follow_redirects=False).status_code in (200, 303)

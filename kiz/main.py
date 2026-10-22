@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -500,10 +501,27 @@ def users_page(request: Request):
     require_admin(request)
     with db.pool.connection() as conn:
         users = conn.execute(
-            "SELECT * FROM users WHERE role IN ('admin', 'packer') ORDER BY active DESC, role, name"
+            "SELECT * FROM users WHERE role IN ('admin', 'packer')"
         ).fetchall()
+    # «Упаковщик 2» before «Упаковщик 10»: numbers inside names sort by value.
+    users.sort(key=lambda u: (not u["active"], u["role"] != "admin",
+                              [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", u["name"])]))
+    people = [{"id": u["id"], "name": u["name"], "code": u["personal_code"] or ""} for u in users]
+    return render(request, "users.html", users=users, people=people, new_code=request.session.get("new_code"))
+
+
+@app.get("/users/{user_id:int}", response_class=HTMLResponse)
+def user_card(request: Request, user_id: int):
+    require_admin(request)
+    with db.pool.connection() as conn:
+        person = conn.execute(
+            "SELECT * FROM users WHERE id = %s AND role IN ('admin', 'packer')", (user_id,)
+        ).fetchone()
+    if not person:
+        return redirect("/users", request, "Сотрудник не найден", error=True)
     new_code = request.session.get("new_code")
-    return render(request, "users.html", users=users, new_code=new_code)
+    return render(request, "user.html", person=person,
+                  new_code=new_code if new_code and new_code["user_id"] == user_id else None)
 
 
 def _valid_code(code):
@@ -539,37 +557,41 @@ def create_user(request: Request, name: str = Form(...), role: str = Form(...),
                 return redirect("/users", request, "Такой пароль уже у другого администратора, придумайте другой",
                                 error=True)
             user_id = conn.execute(
-                "INSERT INTO users (name, role, password_hash, code_hash) VALUES (%s, %s, %s, %s) RETURNING id",
-                (name, role, auth.hash_password(password) if is_admin else None, auth.hash_code(code)),
+                "INSERT INTO users (name, role, password_hash, code_hash, personal_code) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (name, role, auth.hash_password(password) if is_admin else None, auth.hash_code(code),
+                 auth.normalize_code(code)),
             ).fetchone()["id"]
     except UniqueViolation as e:
         return redirect("/users", request, _unique_error(e), error=True)
     if not personal_code:
         request.session["new_code"] = {"user_id": user_id, "name": name, "code": code}
+        return redirect(f"/users/{user_id}", request, f"Сотрудник «{name}» добавлен")
     return redirect("/users", request, f"Сотрудник «{name}» добавлен")
 
 
 @app.post("/users/{user_id}/code")
 def reset_code(request: Request, user_id: int, personal_code: str = Form("")):
     require_admin(request)
+    card = f"/users/{user_id}"
     personal_code = personal_code.strip()
     if personal_code and not _valid_code(personal_code):
-        return redirect("/users", request, "Личный код должен быть не короче 4 символов", error=True)
+        return redirect(card, request, "Личный код должен быть не короче 4 символов", error=True)
     code = personal_code or auth.new_personal_code()
     try:
         with db.tx() as conn:
             row = conn.execute(
-                "UPDATE users SET code_hash = %s WHERE id = %s RETURNING name",
-                (auth.hash_code(code), user_id),
+                "UPDATE users SET code_hash = %s, personal_code = %s WHERE id = %s RETURNING name",
+                (auth.hash_code(code), auth.normalize_code(code), user_id),
             ).fetchone()
     except UniqueViolation as e:
-        return redirect("/users", request, _unique_error(e), error=True)
+        return redirect(card, request, _unique_error(e), error=True)
     if not row:
         return redirect("/users", request, "Сотрудник не найден", error=True)
     if personal_code:
-        return redirect("/users", request, f"Код для «{row['name']}» изменён, старый больше не действует")
+        return redirect(card, request, "Код изменён, старый больше не действует")
     request.session["new_code"] = {"user_id": user_id, "name": row["name"], "code": code}
-    return redirect("/users", request, "Выдан новый личный код, старый больше не действует")
+    return redirect(card, request, "Выдан новый личный код, старый больше не действует")
 
 
 def _cell_text(value):
@@ -616,22 +638,37 @@ async def import_users(request: Request, file: UploadFile = File(...)):
         people = _read_people(file.filename, await file.read())
     except Exception:
         return redirect("/users", request, "Не удалось прочитать файл", error=True)
-    added, problems = 0, []
+    added, updated, problems = 0, 0, []
     with db.tx() as conn:
         for line, (name, code) in enumerate(people, start=1):
             if not name or not _valid_code(code):
                 problems.append(f"строка {line}: нет имени или код короче 4 символов")
                 continue
-            exists = conn.execute("SELECT name FROM users WHERE code_hash = %s", (auth.hash_code(code),)).fetchone()
-            if exists:
-                problems.append(f"{name}: этот код уже есть у «{exists['name']}»")
+            code_hash, shown = auth.hash_code(code), auth.normalize_code(code)
+            owner = conn.execute("SELECT id, name FROM users WHERE code_hash = %s", (code_hash,)).fetchone()
+            same_name = conn.execute(
+                "SELECT id FROM users WHERE lower(name) = lower(%s) AND role IN ('admin', 'packer') "
+                "ORDER BY active DESC, id LIMIT 1", (name,)
+            ).fetchone()
+            if owner and (not same_name or owner["id"] != same_name["id"]):
+                if owner["name"].lower() != name.lower():
+                    problems.append(f"{name}: этот код уже есть у «{owner['name']}»")
+                    continue
+                same_name = owner
+            if same_name:
+                # Loading the same list again refreshes codes of people already in the list.
+                conn.execute("UPDATE users SET code_hash = %s, personal_code = %s WHERE id = %s",
+                             (code_hash, shown, same_name["id"]))
+                updated += 1
                 continue
             conn.execute(
-                "INSERT INTO users (name, role, code_hash) VALUES (%s, 'packer', %s)",
-                (name, auth.hash_code(code)),
+                "INSERT INTO users (name, role, code_hash, personal_code) VALUES (%s, 'packer', %s, %s)",
+                (name, code_hash, shown),
             )
             added += 1
     message = f"Добавлено упаковщиков: {added}."
+    if updated:
+        message += f" Обновлены коды у уже записанных: {updated}."
     if problems:
         message += " Пропущено: " + "; ".join(problems[:10]) + ("…" if len(problems) > 10 else "")
     return redirect("/users", request, message, error=bool(problems))
@@ -640,27 +677,30 @@ async def import_users(request: Request, file: UploadFile = File(...)):
 @app.post("/users/{user_id}/toggle")
 def toggle_user(request: Request, user_id: int, field: str = Form(...)):
     current = require_admin(request)
+    card = f"/users/{user_id}"
     if field != "active":
-        return redirect("/users")
-    if field == "active" and user_id == current["id"]:
-        return redirect("/users", request, "Нельзя отключить самого себя", error=True)
+        return redirect(card)
+    if user_id == current["id"]:
+        return redirect(card, request, "Нельзя отключить самого себя", error=True)
     with db.tx() as conn:
-        conn.execute(f"UPDATE users SET {field} = NOT {field} WHERE id = %s", (user_id,))
-    return redirect("/users")
+        row = conn.execute("UPDATE users SET active = NOT active WHERE id = %s RETURNING active",
+                           (user_id,)).fetchone()
+    return redirect(card, request, "Сотрудник включён" if row and row["active"] else "Сотрудник отключён")
 
 
 @app.post("/users/{user_id}/password")
 def set_password(request: Request, user_id: int, password: str = Form(...)):
     require_admin(request)
+    card = f"/users/{user_id}"
     if len(password) < 8:
-        return redirect("/users", request, "Пароль не короче 8 символов", error=True)
+        return redirect(card, request, "Пароль не короче 8 символов", error=True)
     with db.tx() as conn:
         if _password_taken(conn, password, except_id=user_id):
-            return redirect("/users", request, "Такой пароль уже у другого администратора, придумайте другой",
+            return redirect(card, request, "Такой пароль уже у другого администратора, придумайте другой",
                             error=True)
         conn.execute("UPDATE users SET password_hash = %s WHERE id = %s AND role = 'admin'",
                      (auth.hash_password(password), user_id))
-    return redirect("/users", request, "Пароль изменён")
+    return redirect(card, request, "Пароль изменён")
 
 
 @app.get("/users/badge.pdf")
@@ -676,8 +716,8 @@ def badge(request: Request):
 @app.post("/users/badge/done")
 def badge_done(request: Request):
     require_admin(request)
-    request.session.pop("new_code", None)
-    return redirect("/users")
+    new_code = request.session.pop("new_code", None)
+    return redirect(f"/users/{new_code['user_id']}" if new_code else "/users")
 
 
 # ---------- computers ----------
