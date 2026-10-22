@@ -8,10 +8,12 @@ from pathlib import Path
 
 import openpyxl
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.errors import UniqueViolation
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import auth, config, db, service
@@ -69,6 +71,23 @@ def _local(value):
 templates.env.filters["local"] = _local
 templates.env.filters["code"] = printable_code
 templates.env.globals["role_names"] = auth.ROLE_NAMES
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request, exc):
+    texts = {403: "Недостаточно прав для этой страницы.", 404: "Такой страницы нет."}
+    return templates.TemplateResponse(
+        request, "error.html", {"user": None, "flash": None, "text": texts.get(exc.status_code, str(exc.detail))},
+        status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _bad_request(request, exc):
+    return templates.TemplateResponse(
+        request, "error.html", {"user": None, "flash": None, "text": "Неверный адрес или данные формы."},
+        status_code=400,
+    )
 
 
 @app.exception_handler(LoginRequired)
@@ -168,6 +187,8 @@ def pack_product(request: Request, product_id: int):
 
 
 def _employee(request, personal_code):
+    if not personal_code or not personal_code.strip():
+        return None, "Отсканируйте свой бейдж в поле «Личный код»."
     key = auth.client_key(request)
     if auth.code_throttle.blocked(key):
         return None, "Слишком много неверных личных кодов. Подождите 15 минут или обратитесь к оператору."
@@ -194,7 +215,7 @@ def _job_allowed(request, job_id):
 
 
 @app.post("/print")
-def do_print(request: Request, product_id: int = Form(...), qty: str = Form(...), personal_code: str = Form("")):
+def do_print(request: Request, product_id: int = Form(...), qty: str = Form(""), personal_code: str = Form("")):
     require(request, *ANYONE)
     back = f"/pack/product/{product_id}"
     count = _int(qty)
@@ -515,7 +536,11 @@ def _read_people(filename, content):
     """Rows of (name, code) from an Excel or CSV file; a header row with «Имя»/«Код» is optional."""
     if filename.lower().endswith(".csv"):
         import csv
-        text = content.decode("utf-8-sig", errors="replace")
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # Excel on Windows saves CSV in the Windows Cyrillic encoding.
+            text = content.decode("cp1251", errors="replace")
         dialect = csv.Sniffer().sniff(text[:2000], delimiters=";,\t") if text.strip() else csv.excel
         rows = [list(r) for r in csv.reader(io.StringIO(text), dialect)]
     else:

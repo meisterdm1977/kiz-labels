@@ -15,6 +15,14 @@ document.querySelectorAll("tr[data-href]").forEach((row) => {
   row.addEventListener("click", (e) => { if (e.target.tagName !== "A") location.href = row.dataset.href; });
 });
 
+// Enter in the quantity field moves on to the personal code instead of submitting without it.
+document.querySelectorAll("input[name=qty]").forEach((qty) => {
+  qty.addEventListener("keydown", (e) => {
+    const code = qty.form.querySelector("input[name=personal_code]");
+    if (e.key === "Enter" && code && !code.value) { e.preventDefault(); code.focus(); }
+  });
+});
+
 // After a search the field is selected, so the next scan replaces the old text.
 document.querySelectorAll("input[data-select]").forEach((input) => { if (input.value) input.select(); });
 

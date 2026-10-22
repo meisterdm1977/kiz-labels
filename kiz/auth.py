@@ -6,6 +6,7 @@ import time
 from fastapi import HTTPException, Request
 
 from . import config, db
+from .labels import from_ru_layout
 
 ROLE_NAMES = {
     "admin": "Администратор",
@@ -30,7 +31,7 @@ def check_password(password, stored):
 
 
 def normalize_code(code):
-    return "".join(code.split()).upper()
+    return from_ru_layout("".join(code.split())).upper()
 
 
 def hash_code(code):
@@ -112,10 +113,10 @@ class Throttle:
         self.failures.pop(key, None)
 
 
-# Passwords: 10 wrong tries in 15 minutes. Personal codes are short, so the limit is tighter
-# per client: 8 wrong scans in 15 minutes still leaves room for a few misreads.
+# Passwords: 10 wrong tries in 15 minutes. Personal codes: 20 wrong scans in 15 minutes per client,
+# computer, and all packers share one office address, so their limit is looser: 20 in 15 minutes.
 login_throttle = Throttle(10, 15 * 60)
-code_throttle = Throttle(8, 15 * 60)
+code_throttle = Throttle(20, 15 * 60)
 
 
 def client_key(request: Request):

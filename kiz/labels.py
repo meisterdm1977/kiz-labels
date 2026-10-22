@@ -42,6 +42,16 @@ class Label:
         return code_prefix(self.code)
 
 
+_RU = "йцукенгшщзхъфывапролджэячсмитьбюё" + "ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮЁ"
+_EN = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`" + "QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>~"
+_FROM_RU_LAYOUT = str.maketrans(_RU, _EN)
+
+
+def from_ru_layout(text):
+    """A keyboard-emulating scanner on a Russian layout types Cyrillic letters; map them back to the keys."""
+    return text.translate(_FROM_RU_LAYOUT)
+
+
 def code_prefix(code):
     """GTIN + serial: what identifies a code even when a scanner drops the GS separators."""
     m = CODE_RE.match(code)

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from psycopg.types.json import Jsonb
 
 from . import config, db
-from .labels import GS, Label, LayoutError, code_prefix, read_workbook, render_pdf
+from .labels import GS, Label, LayoutError, code_prefix, from_ru_layout, read_workbook, render_pdf
 
 log = logging.getLogger("kiz")
 
@@ -306,7 +306,7 @@ def job_pdf_items(conn, job_id):
 
 def find_code(conn, scanned):
     """A scanned DataMatrix arrives with or without GS separators; match on GTIN + serial."""
-    text = scanned.strip().replace("\r", "").replace("\n", "")
+    text = from_ru_layout(scanned.strip().replace("\r", "").replace("\n", ""))
     for sep in ("<GS>", "^]", "\\x1d", "~1"):
         text = text.replace(sep, GS)
     if text.startswith("01") and len(text) >= 31:
