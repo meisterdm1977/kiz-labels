@@ -17,7 +17,7 @@ from psycopg.errors import UniqueViolation
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, config, db, service
+from . import auth, config, db, nomenclature, service
 from .auth import AdminRequired, DeviceRequired, require_admin, require_device
 from .badges import badge_pdf
 from .labels import build_print_pdf, printable_code
@@ -455,6 +455,30 @@ def upload_delete(request: Request, upload_id: int, password: str = Form("")):
     if usage["printed"]:
         text += f", напечатанных {usage['printed']}"
     return redirect("/uploads", request, text + ".")
+
+
+# ---------- nomenclature ----------
+
+@app.get("/nomenclature", response_class=HTMLResponse)
+def nomenclature_page(request: Request, q: str = "", category: str = ""):
+    require_admin(request)
+    with db.pool.connection() as conn:
+        rows, categories, loaded = nomenclature.listing(conn, q, category)
+    return render(request, "nomenclature.html", rows=rows, categories=categories, loaded=loaded,
+                  q=q, category=category)
+
+
+@app.post("/nomenclature/upload")
+async def nomenclature_upload(request: Request, file: UploadFile = File(...)):
+    admin = require_admin(request)
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        return redirect("/nomenclature", request, "Нужен файл Excel (.xlsx)", error=True)
+    try:
+        items = nomenclature.read_file(await file.read())
+    except nomenclature.NomenclatureError as e:
+        return redirect("/nomenclature", request, str(e), error=True)
+    nomenclature.replace(items, file.filename, admin["name"])
+    return redirect("/nomenclature", request, f"Номенклатура загружена: {len(items)} строк. Прежний список заменён.")
 
 
 # ---------- stock and journal ----------

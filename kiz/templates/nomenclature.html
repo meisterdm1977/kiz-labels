@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Номенклатура{% endblock %}
+{% block content %}
+<h1>Номенклатура</h1>
+<form method="post" action="/nomenclature/upload" enctype="multipart/form-data" class="card" data-once>
+  <label>Файл номенклатуры (.xlsx): столбцы «Категория», «Артикул/цвет», «Размер», «Основной баркод»
+    <input type="file" name="file" accept=".xlsx" required>
+  </label>
+  <button class="primary">Загрузить файл</button>
+  <p class="muted">{% if loaded %}Сейчас загружено {{ loaded.count }} строк из файла «{{ loaded.file }}», {{ loaded.at|local }}{% if loaded.by %}, {{ loaded.by }}{% endif %}. {% endif %}Новый файл полностью заменяет прежний список.</p>
+</form>
+<form method="get" action="/nomenclature" class="filters">
+  <input name="q" value="{{ q }}" placeholder="Артикул, размер или баркод">
+  <select name="category" onchange="this.form.submit()">
+    <option value="">Все категории</option>
+    {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == category }}>{{ c }}</option>{% endfor %}
+  </select>
+  <button>Показать</button>
+</form>
+<p class="muted">Строк: {{ rows|length }}</p>
+<table class="list">
+  <thead><tr><th>Категория</th><th>Артикул/цвет</th><th>Размер</th><th>Основной баркод</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr><td>{{ r.category }}</td><td>{{ r.article }}</td><td>{{ r.size }}</td><td class="mono">{{ r.barcode }}</td></tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">{{ 'Ничего не найдено' if q or category else 'Номенклатура пока не загружена' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

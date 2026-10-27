@@ -97,3 +97,13 @@ ALTER TABLE uploads ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users
 ALTER TABLE uploads DROP CONSTRAINT IF EXISTS uploads_status_check;
 ALTER TABLE uploads ADD CONSTRAINT uploads_status_check
     CHECK (status IN ('processing', 'ready', 'failed', 'added', 'cancelled', 'deleted'));
+
+-- Product list (category, article/colour, size, main barcode) loaded from an Excel file; replaced as a whole.
+CREATE TABLE IF NOT EXISTS nomenclature (
+    id        serial PRIMARY KEY,
+    position  integer NOT NULL,
+    category  text NOT NULL DEFAULT '',
+    article   text NOT NULL,
+    size      text NOT NULL DEFAULT '',
+    barcode   text NOT NULL DEFAULT ''
+);

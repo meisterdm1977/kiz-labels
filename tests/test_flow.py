@@ -366,3 +366,31 @@ def test_side_menu_shows_sections_by_role(client):
     page = client.get("/journal").text
     assert all(f'href="{url}"' in page for url in ("/pack", "/archive", "/uploads", "/stock", "/journal", "/users", "/devices"))
     assert 'class="on"><svg' in page and "Выйти" in page
+
+
+def test_nomenclature_upload_replaces_the_list(client, tmp_path):
+    import openpyxl
+    login(client)
+    path = tmp_path / "nom.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Категория", "Артикул/цвет", "Размер", "Основной баркод"])
+    ws.append(["Брюки", "2409-2 бежевый", "M", "2043747204766"])
+    ws.append(["Шорты", "Шорты 02 коричневый", "2XL", 2047687243885])
+    wb.save(path)
+    with open(path, "rb") as f:
+        client.post("/nomenclature/upload", files={"file": ("nom.xlsx", f.read())})
+    page = client.get("/nomenclature").text
+    assert "2409-2 бежевый" in page and "2047687243885" in page and "Строк: 2" in page
+    assert "Строк: 1" in client.get("/nomenclature", params={"category": "Шорты"}).text
+    assert "Строк: 1" in client.get("/nomenclature", params={"q": "бежев"}).text
+
+    ws.delete_rows(3)
+    wb.save(path)
+    with open(path, "rb") as f:
+        client.post("/nomenclature/upload", files={"file": ("nom2.xlsx", f.read())})
+    page = client.get("/nomenclature").text
+    assert "Шорты 02" not in page and "Строк: 1" in page and "nom2.xlsx" in page
+
+    bad = client.post("/nomenclature/upload", files={"file": ("x.txt", b"hello")}, follow_redirects=True).text
+    assert "Нужен файл Excel" in bad and "Строк: 1" in bad
