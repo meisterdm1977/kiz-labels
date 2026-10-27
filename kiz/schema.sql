@@ -110,3 +110,10 @@ CREATE TABLE IF NOT EXISTS nomenclature (
 -- Rows added by hand survive a file upload; a file row with the same barcode replaces them.
 ALTER TABLE nomenclature ADD COLUMN IF NOT EXISTS manual boolean NOT NULL DEFAULT false;
 ALTER TABLE nomenclature ADD COLUMN IF NOT EXISTS added_by text NOT NULL DEFAULT '';
+
+-- Pictures (logos) placed on stickers in the designer, already turned black and white.
+CREATE TABLE IF NOT EXISTS sticker_images (
+    id          serial PRIMARY KEY,
+    data        bytea NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);

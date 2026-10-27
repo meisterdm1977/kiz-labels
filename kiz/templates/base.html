@@ -9,7 +9,8 @@
 <body>
 {% set sections = [
   ("/pack", "Печать", "print"), ("/archive", "Архив", "archive"), ("/uploads", "Загрузка", "upload"),
-  ("/stock", "Остатки", "stock"), ("/nomenclature", "Номенклатура", "nomenclature"), ("/journal", "Журнал", "journal"), ("/users", "Сотрудники", "people"),
+  ("/stock", "Остатки", "stock"), ("/nomenclature", "Номенклатура", "nomenclature"), ("/designer", "Конструктор наклеек", "designer"),
+  ("/journal", "Журнал", "journal"), ("/users", "Сотрудники", "people"),
   ("/devices", "Компьютеры", "computer")] if admin else [("/pack", "Печать", "print")] %}
 {% set path = request.url.path %}
 {% set current = namespace(title="Этикетки ЧЗ") %}

@@ -4,7 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       python3 python3-venv libreoffice-calc-nogui libdmtx0b \
-      fonts-crosextra-carlito fonts-dejavu-core fonts-liberation ca-certificates \
+      fonts-crosextra-carlito fonts-crosextra-caladea fonts-dejavu-core fonts-liberation \
+      poppler-utils ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /venv

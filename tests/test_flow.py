@@ -460,3 +460,40 @@ def test_barcode_and_packer_stickers(client):
 
     r = client.post("/pack/sticker", data={"code": "2000000000999"}, follow_redirects=True)
     assert "не найден в номенклатуре" in r.text
+
+
+def test_sticker_designer_layout_is_used_for_printing(client):
+    import io
+    login(client)
+    page = client.get("/designer").text
+    assert "Конструктор наклеек 58×40" in page and "Проверила упаковала" in page
+
+    from kiz import stickers
+    layout = stickers.DEFAULTS["product"] + [
+        {"id": "mine", "type": "text", "x": 2, "y": 2, "w": 40, "h": 5, "text": "Спасибо за покупку", "field": None,
+         "font": "Arial", "size": 9, "bold": False, "align": "center"},
+        {"id": "l", "type": "line", "x": 2, "y": 20, "w": 54, "h": 0.3},
+        {"id": "bad", "type": "script"},
+    ]
+    png = client.post("/designer/preview", json={"kind": "product", "layout": layout}).content
+    assert png[:4] == b"\x89PNG"
+    assert client.post("/designer/save", json={"kind": "product", "layout": layout}).json() == {"ok": True}
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 20), "black").save(buf, "PNG")
+    img = client.post("/designer/image", files={"file": ("logo.png", buf.getvalue())}).json()
+    assert img["w"] == 40 and img["h"] == 20
+    assert "error" in client.post("/designer/image", files={"file": ("x.png", b"nope")}).json()
+
+    client.post("/nomenclature/add", data={"category": "Платья", "article": "888 синий", "size": "M",
+                                           "barcode": "2039356100002"})
+    r = client.post("/pack/sticker", data={"code": "2039356100002"}, follow_redirects=True)
+    token = re.search(r"/pack/sticker/([\w-]+)/pdf", r.text).group(1)
+    text = PdfReader(io.BytesIO(client.get(f"/pack/sticker/{token}/pdf").content)).pages[0].extract_text()
+    assert "Спасибо за покупку" in text and "Платье" in text and "Цвет: СИНИЙ" in text
+
+    client.post("/designer/reset", data={"kind": "product"})
+    r = client.post("/pack/sticker", data={"code": "2039356100002"}, follow_redirects=True)
+    token = re.search(r"/pack/sticker/([\w-]+)/pdf", r.text).group(1)
+    assert "Спасибо" not in PdfReader(io.BytesIO(client.get(f"/pack/sticker/{token}/pdf").content)).pages[0].extract_text()

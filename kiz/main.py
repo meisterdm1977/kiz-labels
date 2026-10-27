@@ -3,6 +3,8 @@ import io
 import logging
 import re
 import secrets
+import subprocess
+import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -11,7 +13,7 @@ from pathlib import Path
 import openpyxl
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.errors import UniqueViolation
@@ -271,15 +273,16 @@ def pack_sticker(request: Request, code: str = Form("")):
             if auth.code_throttle.blocked(key):
                 return redirect(back, request, "Слишком много неверных кодов. Подождите 15 минут.", error=True)
             employee = auth.user_by_code(conn, scanned)
-    if row:
-        pdf, title = stickers.product_pdf(row), f"{row['article']} {row['size']}".strip()
-    elif employee:
-        auth.code_throttle.reset(key)
-        pdf = stickers.packer_pdf(employee["name"], auth.normalize_code(scanned), datetime.now(config.TIMEZONE).date())
-        title = f"Проверила упаковала: {stickers.short_name(employee['name'])}"
-    else:
-        auth.code_throttle.fail(key)
-        return redirect(back, request, f"Баркод {scanned} не найден в номенклатуре", error=True)
+        if row:
+            pdf, title = stickers.product_pdf(conn, row), f"{row['article']} {row['size']}".strip()
+        elif employee:
+            auth.code_throttle.reset(key)
+            pdf = stickers.packer_pdf(conn, employee["name"], auth.normalize_code(scanned),
+                                      datetime.now(config.TIMEZONE).date())
+            title = f"Проверила упаковала: {stickers.short_name(employee['name'])}"
+        else:
+            auth.code_throttle.fail(key)
+            return redirect(back, request, f"Баркод {scanned} не найден в номенклатуре", error=True)
     now = time.time()
     for token in [t for t, v in _stickers.items() if now - v[1] > config.PRINT_LINK_MINUTES * 60]:
         _stickers.pop(token, None)
@@ -565,6 +568,97 @@ async def nomenclature_upload(request: Request, file: UploadFile = File(...)):
         return redirect("/nomenclature", request, str(e), error=True)
     nomenclature.replace(items, file.filename, admin["name"])
     return redirect("/nomenclature", request, f"Номенклатура загружена: {len(items)} строк. Прежний список из файла заменён, строки «вручную» сохранены.")
+
+
+# ---------- sticker designer ----------
+
+SAMPLE_PRODUCT = {"category": "Рубашки", "article": "138N/белый", "size": "56", "barcode": "2039356108373"}
+SAMPLE_PACKER = ("Михайлова Светлана", "0000000000")
+PREVIEW_DPI = 304.8  # 12 px per mm
+
+
+def _sample_data(conn, kind, sample):
+    if kind == "packer":
+        return stickers.packer_data(sample.strip() or SAMPLE_PACKER[0], SAMPLE_PACKER[1],
+                                    datetime.now(config.TIMEZONE).date())
+    row = nomenclature.by_barcode(conn, sample.strip()) if sample.strip().isdigit() else None
+    if row is None and not sample.strip():
+        row = conn.execute("SELECT * FROM nomenclature ORDER BY manual, position LIMIT 1").fetchone()
+    return stickers.product_data(row or SAMPLE_PRODUCT)
+
+
+def _kind(kind):
+    return kind if kind in stickers.KINDS else "product"
+
+
+@app.get("/designer", response_class=HTMLResponse)
+def designer_page(request: Request, kind: str = "product"):
+    require_admin(request)
+    kind = _kind(kind)
+    with db.pool.connection() as conn:
+        layout = stickers.load(conn, kind)
+    return render(request, "designer.html", kind=kind, kinds=stickers.KINDS, layout=layout,
+                  fields=stickers.FIELDS[kind], code_type=stickers.CODES[kind], fonts=stickers.FONT_NAMES,
+                  width=stickers.WIDTH_MM, height=stickers.HEIGHT_MM)
+
+
+@app.post("/designer/preview")
+async def designer_preview(request: Request):
+    require_admin(request)
+    try:
+        body = await request.json()
+        kind = _kind(body.get("kind"))
+        layout = stickers.clean(kind, body.get("layout"))
+    except (ValueError, AttributeError, stickers.LayoutError):
+        return Response("Неверный макет", status_code=400, media_type="text/plain; charset=utf-8")
+    with db.pool.connection() as conn:
+        pdf = stickers.render(kind, layout, _sample_data(conn, kind, str(body.get("sample") or "")),
+                              stickers.images_for(conn, layout))
+    if body.get("format") == "pdf":
+        return Response(pdf, media_type="application/pdf")
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "s.pdf"
+        src.write_bytes(pdf)
+        subprocess.run(["pdftoppm", "-png", "-r", str(PREVIEW_DPI), "-singlefile", str(src), str(Path(tmp) / "s")],
+                       check=True, timeout=30)
+        png = (Path(tmp) / "s.png").read_bytes()
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/designer/save")
+async def designer_save(request: Request):
+    require_admin(request)
+    try:
+        body = await request.json()
+        kind = _kind(body.get("kind"))
+        with db.tx() as conn:
+            stickers.save(conn, kind, body.get("layout"))
+    except (ValueError, AttributeError, stickers.LayoutError):
+        return JSONResponse({"error": "Неверный макет"}, status_code=400)
+    return {"ok": True}
+
+
+@app.post("/designer/reset")
+def designer_reset(request: Request, kind: str = Form("product")):
+    require_admin(request)
+    kind = _kind(kind)
+    with db.tx() as conn:
+        stickers.reset(conn, kind)
+    return redirect(f"/designer?kind={kind}", request, f"Макет «{stickers.KINDS[kind]}» возвращён к исходному")
+
+
+@app.post("/designer/image")
+async def designer_image(request: Request, file: UploadFile = File(...)):
+    require_admin(request)
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        return JSONResponse({"error": "Картинка больше 5 МБ"}, status_code=400)
+    try:
+        with db.tx() as conn:
+            row = stickers.store_image(conn, content)
+    except stickers.LayoutError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"id": row["id"], "w": row["w"], "h": row["h"]}
 
 
 # ---------- stock and journal ----------

@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Конструктор наклеек{% endblock %}
+{% block content %}
+<h1>Конструктор наклеек 58×40</h1>
+<div class="tabs">
+  {% for k, title in kinds.items() %}<a href="/designer?kind={{ k }}" class="{{ 'active' if k == kind }}">{{ title }}</a>{% endfor %}
+</div>
+<div class="designer">
+  <div>
+    <div class="designer-tools">
+      <button type="button" data-add="text">+ Текст</button>
+      <button type="button" data-add="line">+ Линия</button>
+      <button type="button" id="add-image">+ Картинка</button>
+      <input type="file" id="image-file" accept="image/png,image/jpeg" style="display: none">
+      <select id="add-field">
+        <option value="">+ Поле…</option>
+        {% for key, title in fields.items() %}<option value="field:{{ key }}">{{ title }}</option>{% endfor %}
+        <option value="{{ code_type }}">{{ 'Штрихкод' if code_type == 'barcode' else 'QR-код' }}</option>
+        {% if kind == 'product' %}<option value="eac">Знак EAC</option>{% endif %}
+      </select>
+    </div>
+    <div id="stage" style="width: {{ width * 12 }}px; height: {{ height * 12 }}px">
+      <img id="preview" alt="">
+    </div>
+    <div class="designer-tools">
+      <label>{{ 'Пример: баркод товара' if kind == 'product' else 'Пример: ФИО сотрудника' }}
+        <input id="sample" placeholder="{{ 'из номенклатуры' if kind == 'product' else 'Михайлова Светлана' }}"></label>
+    </div>
+    <div class="designer-tools">
+      <button type="button" class="primary" id="save">Сохранить</button>
+      <button type="button" id="pdf">Открыть PDF</button>
+      <span id="state" class="muted"></span>
+    </div>
+    <form method="post" action="/designer/reset" onsubmit="return confirm('Вернуть исходный макет? Ваши изменения в этом макете пропадут.')">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <button>Вернуть как было</button>
+    </form>
+  </div>
+  <div id="props" class="card designer-props"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const KIND = {{ kind|tojson }}, W = {{ width }}, H = {{ height }}, S = 12;
+const FIELDS = {{ fields|tojson }}, FONTS = {{ fonts|tojson }};
+const TYPE_NAMES = {text: "Текст", line: "Линия", image: "Картинка", barcode: "Штрихкод", qr: "QR-код", eac: "Знак EAC"};
+let layout = {{ layout|tojson }};
+let selected = null, dirty = false, timer = null;
+const stage = document.getElementById("stage"), props = document.getElementById("props");
+const round = (v, step) => Math.round(v / step) * step;
+const fix = (v) => Math.round(v * 100) / 100;
+const nextId = () => "e" + Date.now().toString(36) + Math.floor(Math.random() * 1000);
+const title = (el) => el.type === "text" && el.field ? FIELDS[el.field] : (el.type === "text" ? "Текст: " + el.text : TYPE_NAMES[el.type]);
+
+function markDirty() {
+  dirty = true;
+  document.getElementById("state").textContent = "Есть несохранённые изменения";
+  schedulePreview();
+}
+
+function schedulePreview() {
+  clearTimeout(timer);
+  timer = setTimeout(refreshPreview, 250);
+}
+
+async function refreshPreview() {
+  const r = await fetch("/designer/preview", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({kind: KIND, layout, sample: document.getElementById("sample").value})});
+  if (!r.ok) return;
+  const img = document.getElementById("preview");
+  const old = img.src;
+  img.src = URL.createObjectURL(await r.blob());
+  if (old) URL.revokeObjectURL(old);
+}
+
+function drawBoxes() {
+  stage.querySelectorAll(".el").forEach((n) => n.remove());
+  layout.forEach((el) => {
+    const box = document.createElement("div");
+    box.className = "el" + (el === selected ? " selected" : "");
+    Object.assign(box.style, {left: el.x * S + "px", top: el.y * S + "px", width: el.w * S + "px", height: el.h * S + "px"});
+    box.title = title(el);
+    box.addEventListener("pointerdown", (e) => startDrag(e, el, false));
+    if (el === selected) {
+      const handle = document.createElement("div");
+      handle.className = "handle";
+      handle.addEventListener("pointerdown", (e) => startDrag(e, el, true));
+      box.appendChild(handle);
+    }
+    stage.appendChild(box);
+  });
+}
+
+function startDrag(e, el, resize) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (selected !== el) { selected = el; drawBoxes(); drawProps(); }
+  const start = {x: e.clientX, y: e.clientY, el: {...el}};
+  let moved = false;
+  const move = (ev) => {
+    const dx = (ev.clientX - start.x) / S, dy = (ev.clientY - start.y) / S;
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 0.2) return;
+    moved = true;
+    const step = ev.altKey ? 0.1 : 0.5;
+    if (resize) {
+      el.w = fix(Math.max(0.2, round(start.el.w + dx, step)));
+      el.h = fix(Math.max(0.2, round(start.el.h + dy, step)));
+    } else {
+      el.x = fix(round(start.el.x + dx, step));
+      el.y = fix(round(start.el.y + dy, step));
+    }
+    drawBoxes();
+    drawProps();
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    if (moved) markDirty();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function input(label, value, onchange, attrs = {}) {
+  const wrap = document.createElement("label");
+  wrap.textContent = label;
+  const field = document.createElement(attrs.tag || "input");
+  if (attrs.options) attrs.options.forEach((o) => field.add(new Option(o, o)));
+  Object.entries(attrs).forEach(([k, v]) => { if (!["tag", "options"].includes(k)) field.setAttribute(k, v); });
+  if (attrs.type === "checkbox") { field.checked = value; wrap.prepend(field); wrap.className = "check"; }
+  else { field.value = value; wrap.appendChild(field); }
+  field.addEventListener(attrs.type === "checkbox" || attrs.tag === "select" ? "change" : "input", () => {
+    onchange(attrs.type === "checkbox" ? field.checked : field.value);
+    drawBoxes();
+    markDirty();
+  });
+  return wrap;
+}
+
+function button(text, onclick, cls = "") {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = text;
+  b.className = cls;
+  b.addEventListener("click", () => { onclick(); drawBoxes(); drawProps(); markDirty(); });
+  return b;
+}
+
+function row(...items) {
+  const div = document.createElement("div");
+  div.className = "props-row";
+  items.forEach((i) => div.appendChild(i));
+  return div;
+}
+
+function drawProps() {
+  props.innerHTML = "";
+  if (!selected) {
+    props.innerHTML = "<h2>Элемент не выбран</h2><p class='muted'>Нажмите на элемент на наклейке, чтобы его настроить. " +
+      "Перетаскивайте мышкой, уголок справа внизу меняет размер. Стрелки на клавиатуре сдвигают выбранный элемент на 0,5 мм " +
+      "(с Shift на 0,1 мм). При перетаскивании с Alt шаг 0,1 мм.</p>";
+    return;
+  }
+  const el = selected;
+  const h = document.createElement("h2");
+  h.textContent = title(el);
+  props.appendChild(h);
+  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  if (el.type === "text") {
+    props.appendChild(input(el.field ? "Подпись перед значением" : "Текст", el.text, (v) => { el.text = v; }));
+    props.appendChild(row(
+      input("Шрифт", el.font, (v) => { el.font = v; }, {tag: "select", options: FONTS}),
+      input("Размер", el.size, (v) => { el.size = num(v); }, {type: "number", step: "0.5", min: "4", max: "72"})));
+    props.appendChild(input("Жирный", el.bold, (v) => { el.bold = v; }, {type: "checkbox"}));
+    const align = row(...[["left", "По левому"], ["center", "По центру"], ["right", "По правому"]].map(([a, t]) =>
+      button(t, () => { el.align = a; }, el.align === a ? "active" : "")));
+    const cap = document.createElement("p");
+    cap.className = "muted";
+    cap.textContent = "Текст внутри рамки:";
+    props.appendChild(cap);
+    props.appendChild(align);
+  }
+  if (el.type === "barcode") {
+    props.appendChild(row(
+      input("Шрифт цифр", el.font, (v) => { el.font = v; }, {tag: "select", options: FONTS}),
+      input("Размер цифр (0 — без цифр)", el.digits, (v) => { el.digits = num(v); }, {type: "number", step: "0.5", min: "0", max: "30"})));
+  }
+  props.appendChild(row(
+    input("X, мм", el.x, (v) => { el.x = num(v); }, {type: "number", step: "0.1"}),
+    input("Y, мм", el.y, (v) => { el.y = num(v); }, {type: "number", step: "0.1"})));
+  props.appendChild(row(
+    input("Ширина, мм", el.w, (v) => { el.w = num(v); }, {type: "number", step: "0.1", min: "0.1"}),
+    input("Высота, мм", el.h, (v) => { el.h = num(v); }, {type: "number", step: "0.1", min: "0.1"})));
+  props.appendChild(row(
+    button("По центру ↔", () => { el.x = fix((W - el.w) / 2); }),
+    button("По центру ↕", () => { el.y = fix((H - el.h) / 2); })));
+  if (el.type === "line") {
+    props.appendChild(row(button(el.w >= el.h ? "Сделать вертикальной" : "Сделать горизонтальной",
+      () => { [el.w, el.h] = [el.h, el.w]; })));
+  }
+  props.appendChild(row(button("Удалить элемент", () => { layout = layout.filter((x) => x !== el); selected = null; }, "danger")));
+}
+
+function add(el) {
+  layout.push({id: nextId(), ...el});
+  selected = layout[layout.length - 1];
+  drawBoxes();
+  drawProps();
+  markDirty();
+}
+
+document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.add === "text")
+    add({type: "text", x: 2, y: 2, w: 30, h: 5, text: "Текст", field: null, font: FONTS[0], size: 10, bold: false, align: "left"});
+  else add({type: "line", x: 2, y: 20, w: 54, h: 0.3});
+}));
+
+document.getElementById("add-field").addEventListener("change", (e) => {
+  const v = e.target.value;
+  e.target.value = "";
+  if (v.startsWith("field:"))
+    add({type: "text", x: 2, y: 2, w: 30, h: 5, text: "", field: v.slice(6), font: FONTS[0], size: 10, bold: false, align: "left"});
+  else if (v === "barcode") add({type: "barcode", x: 2, y: 22, w: 54, h: 16, digits: 9, font: FONTS[0]});
+  else if (v === "qr") add({type: "qr", x: 41, y: 23, w: 15, h: 15});
+  else if (v === "eac") add({type: "eac", x: 47, y: 9.5, w: 9, h: 4.2});
+});
+
+document.getElementById("add-image").addEventListener("click", () => document.getElementById("image-file").click());
+document.getElementById("image-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const data = new FormData();
+  data.append("file", file);
+  const r = await fetch("/designer/image", {method: "POST", body: data});
+  const res = await r.json();
+  if (!r.ok) { alert(res.error || "Не удалось загрузить картинку"); return; }
+  const w = 20, h = Math.min(38, fix(w * res.h / res.w));
+  add({type: "image", x: 2, y: 2, w, h, image: res.id});
+});
+
+stage.addEventListener("pointerdown", () => { selected = null; drawBoxes(); drawProps(); });
+
+document.addEventListener("keydown", (e) => {
+  if (!selected || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  const step = e.shiftKey ? 0.1 : 0.5;
+  const moves = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]};
+  if (!moves[e.key]) return;
+  e.preventDefault();
+  selected.x = fix(selected.x + moves[e.key][0]);
+  selected.y = fix(selected.y + moves[e.key][1]);
+  drawBoxes();
+  drawProps();
+  markDirty();
+});
+
+document.getElementById("sample").addEventListener("input", schedulePreview);
+
+document.getElementById("save").addEventListener("click", async () => {
+  const r = await fetch("/designer/save", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({kind: KIND, layout})});
+  if (!r.ok) { alert("Не удалось сохранить макет"); return; }
+  dirty = false;
+  document.getElementById("state").textContent = "Сохранено. Следующие наклейки печатаются по этому макету.";
+});
+
+document.getElementById("pdf").addEventListener("click", async () => {
+  const r = await fetch("/designer/preview", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({kind: KIND, layout, sample: document.getElementById("sample").value, format: "pdf"})});
+  if (r.ok) window.open(URL.createObjectURL(await r.blob()), "_blank");
+});
+
+window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+drawBoxes();
+drawProps();
+refreshPreview();
+</script>
+{% endblock %}

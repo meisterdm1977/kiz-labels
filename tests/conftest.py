@@ -22,7 +22,8 @@ def client():
     with TestClient(app) as c:
         with db.tx() as conn:
             conn.execute(
-                "TRUNCATE print_job_codes, print_jobs, codes, uploads, products, settings, devices RESTART IDENTITY CASCADE"
+                "TRUNCATE print_job_codes, print_jobs, codes, uploads, products, settings, devices, nomenclature, "
+                "sticker_images RESTART IDENTITY CASCADE"
             )
             conn.execute("DELETE FROM users WHERE login IS DISTINCT FROM 'admin'")
         yield c
