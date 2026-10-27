@@ -84,3 +84,6 @@ iframe.pdf { width: 100%; height: 70vh; border: 1px solid var(--line); backgroun
 .size-opt:has(input:checked) .size-icon { border-color: #8a6d00; }
 .card > h2:first-child { margin-top: 0; }
 #manual label { white-space: nowrap; }
+.pack-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.pack-title { font-size: 26px; font-weight: bold; color: #333; margin: 4px 0 8px; }
+@media (max-width: 900px) { .pack-columns { grid-template-columns: 1fr; gap: 0; } }

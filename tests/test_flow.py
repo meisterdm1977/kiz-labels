@@ -431,3 +431,32 @@ def test_nomenclature_manual_rows_survive_uploads(client, tmp_path):
     upload([["Юбки", "Юбка из файла", "M", "2000000000028"]], "f3.xlsx")
     page = client.get("/nomenclature").text
     assert "Ручная юбка 2" not in page and "Юбка из файла" in page and "Строк: 1" in page
+
+
+def test_barcode_and_packer_stickers(client):
+    import io
+    login(client)
+    client.post("/nomenclature/add", data={"category": "Рубашки", "article": "777N/белый", "size": "56",
+                                           "barcode": "2039356100001"})
+    code = create_packer(client, "Смирнова Ольга")
+    page = client.get("/pack").text
+    assert "Печатать КИЗ" in page and "Печатать наклейку ШК" in page
+
+    r = client.post("/pack/sticker", data={"code": "2039356100001"}, follow_redirects=True)
+    assert "777N/белый 56" in r.text
+    token = re.search(r"/pack/sticker/([\w-]+)/pdf", r.text).group(1)
+    pdf = client.get(f"/pack/sticker/{token}/pdf").content
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    assert round(float(page.mediabox.width) / 72 * 25.4) == 58 and round(float(page.mediabox.height) / 72 * 25.4) == 40
+    text = page.extract_text()
+    assert "Рубашка" in text and "Артикул: 777N" in text and "Цвет: БЕЛЫЙ" in text and "ИП Малоземов" in text
+    assert "2039356100001" in text
+
+    r = client.post("/pack/sticker", data={"code": code}, follow_redirects=True)
+    assert "Проверила упаковала: Ольга С" in r.text
+    token = re.search(r"/pack/sticker/([\w-]+)/pdf", r.text).group(1)
+    pdf = client.get(f"/pack/sticker/{token}/pdf").content
+    assert "Ольга С" in PdfReader(io.BytesIO(pdf)).pages[0].extract_text()
+
+    r = client.post("/pack/sticker", data={"code": "2000000000999"}, follow_redirects=True)
+    assert "не найден в номенклатуре" in r.text

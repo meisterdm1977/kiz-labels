@@ -108,6 +108,10 @@ def save_manual(form, admin_name, row_id=None):
     return item
 
 
+def by_barcode(conn, barcode):
+    return conn.execute("SELECT * FROM nomenclature WHERE barcode = %s ORDER BY manual LIMIT 1", (barcode,)).fetchone()
+
+
 def get_row(conn, row_id):
     return conn.execute("SELECT * FROM nomenclature WHERE id = %s", (row_id,)).fetchone()
 

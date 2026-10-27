@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import re
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -17,7 +18,7 @@ from psycopg.errors import UniqueViolation
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, config, db, nomenclature, service
+from . import auth, config, db, nomenclature, service, stickers
 from .auth import AdminRequired, DeviceRequired, require_admin, require_device
 from .badges import badge_pdf
 from .labels import build_print_pdf, printable_code
@@ -219,7 +220,7 @@ def home(request: Request):
 # ---------- packing station ----------
 
 @app.get("/pack", response_class=HTMLResponse)
-def pack(request: Request, q: str = ""):
+def pack(request: Request, q: str = "", focus: str = ""):
     require_device(request)
     q = q.strip()
     with db.pool.connection() as conn:
@@ -228,7 +229,7 @@ def pack(request: Request, q: str = ""):
             if product:
                 return redirect(f"/pack/product/{product['id']}")
         products = service.find_products(conn, q) or service.suggest_products(conn, q, limit=50)
-    return render(request, "pack.html", q=q, products=products)
+    return render(request, "pack.html", q=q, products=products, focus=focus)
 
 
 @app.get("/pack/suggest")
@@ -249,6 +250,61 @@ def pack_product(request: Request, product_id: int):
     if not product:
         return redirect("/pack", request, "Товар не найден", error=True)
     return render(request, "product.html", product=product, last_jobs=last_jobs)
+
+
+# Sticker PDFs live in memory for a few minutes under a random token: the packer sticker carries a personal code.
+_stickers = {}
+
+
+@app.post("/pack/sticker")
+def pack_sticker(request: Request, code: str = Form("")):
+    require_device(request)
+    back = "/pack?focus=sticker"
+    scanned = "".join(code.split())
+    if not scanned:
+        return redirect(back, request, "Отсканируйте баркод товара или личный код", error=True)
+    key = auth.client_key(request)
+    with db.pool.connection() as conn:
+        row = nomenclature.by_barcode(conn, scanned) if scanned.isdigit() else None
+        employee = None
+        if not row:
+            if auth.code_throttle.blocked(key):
+                return redirect(back, request, "Слишком много неверных кодов. Подождите 15 минут.", error=True)
+            employee = auth.user_by_code(conn, scanned)
+    if row:
+        pdf, title = stickers.product_pdf(row), f"{row['article']} {row['size']}".strip()
+    elif employee:
+        auth.code_throttle.reset(key)
+        pdf = stickers.packer_pdf(employee["name"], auth.normalize_code(scanned), datetime.now(config.TIMEZONE).date())
+        title = f"Проверила упаковала: {stickers.short_name(employee['name'])}"
+    else:
+        auth.code_throttle.fail(key)
+        return redirect(back, request, f"Баркод {scanned} не найден в номенклатуре", error=True)
+    now = time.time()
+    for token in [t for t, v in _stickers.items() if now - v[1] > config.PRINT_LINK_MINUTES * 60]:
+        _stickers.pop(token, None)
+    token = secrets.token_urlsafe(16)
+    _stickers[token] = (pdf, now, title)
+    return redirect(f"/pack/sticker/{token}")
+
+
+@app.get("/pack/sticker/{token}", response_class=HTMLResponse)
+def pack_sticker_page(request: Request, token: str):
+    require_device(request)
+    item = _stickers.get(token)
+    if not item:
+        return redirect("/pack?focus=sticker", request, "Наклейка устарела, отсканируйте ещё раз", error=True)
+    return render(request, "sticker.html", token=token, title=item[2])
+
+
+@app.get("/pack/sticker/{token}/pdf")
+def pack_sticker_pdf(request: Request, token: str):
+    require_device(request)
+    item = _stickers.get(token)
+    if not item:
+        return Response("Наклейка устарела, отсканируйте ещё раз.", status_code=404,
+                        media_type="text/plain; charset=utf-8")
+    return Response(item[0], media_type="application/pdf", headers={"Cache-Control": "no-store"})
 
 
 def _employee(request, personal_code):

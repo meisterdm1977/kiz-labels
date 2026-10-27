@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Наклейка 58×40{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Наклейка 58×40</h1>
+  <p><b>{{ title }}</b></p>
+  <p>В окне печати выберите принтер, в который заправлены этикетки 58×40 (TSC TE200), и нажмите «Печать».</p>
+  <button class="primary big" id="print-btn" disabled>Открыть окно печати</button>
+  <p><a href="/pack?focus=sticker">← Следующая наклейка</a></p>
+</div>
+<iframe id="pdf" src="/pack/sticker/{{ token }}/pdf" class="pdf"></iframe>
+{% endblock %}
+{% block scripts %}<script>setupPrint();</script>{% endblock %}

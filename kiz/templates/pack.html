@@ -1,13 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Печать{% endblock %}
 {% block content %}
-<form method="get" action="/pack" class="search">
-  <div class="suggest grow">
-    <input name="q" id="product-search" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" autofocus autocomplete="off" data-select>
-    <ul id="product-suggest" class="suggest-list" hidden></ul>
-  </div>
-  <button class="primary">Найти</button>
-</form>
+<div class="pack-columns">
+  <section>
+    <h1 class="pack-title">Печатать КИЗ</h1>
+    <form method="get" action="/pack" class="search">
+      <div class="suggest grow">
+        <input name="q" id="product-search" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" {{ '' if focus == 'sticker' else 'autofocus' }} autocomplete="off" data-select>
+        <ul id="product-suggest" class="suggest-list" hidden></ul>
+      </div>
+      <button class="primary">Найти</button>
+    </form>
+  </section>
+  <section>
+    <h1 class="pack-title">Печатать наклейку ШК</h1>
+    <form method="post" action="/pack/sticker" class="search">
+      <input name="code" placeholder="Баркод товара или личный код" {{ 'autofocus' if focus == 'sticker' }} autocomplete="off" data-select>
+      <button class="primary">Печать</button>
+    </form>
+  </section>
+</div>
 {% if q %}
   {% if products %}
   <table class="list">
