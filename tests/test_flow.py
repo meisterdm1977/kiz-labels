@@ -394,3 +394,40 @@ def test_nomenclature_upload_replaces_the_list(client, tmp_path):
 
     bad = client.post("/nomenclature/upload", files={"file": ("x.txt", b"hello")}, follow_redirects=True).text
     assert "Нужен файл Excel" in bad and "Строк: 1" in bad
+
+
+def test_nomenclature_manual_rows_survive_uploads(client, tmp_path):
+    import openpyxl
+    login(client)
+
+    def upload(rows, name):
+        wb = openpyxl.Workbook()
+        wb.active.append(["Категория", "Артикул/цвет", "Размер", "Основной баркод"])
+        for r in rows:
+            wb.active.append(r)
+        path = tmp_path / name
+        wb.save(path)
+        client.post("/nomenclature/upload", files={"file": (name, path.read_bytes())})
+
+    upload([["Брюки", "Файловые брюки", "M", "2000000000011"]], "f1.xlsx")
+    added = client.post("/nomenclature/add", data={"category": "Юбки", "article": "Ручная юбка",
+                                                   "size": "S", "barcode": "2000000000028"}, follow_redirects=True).text
+    assert "Добавлено вручную: Ручная юбка S" in added and "вручную</span>" in added and "Строк: 2" in added
+
+    dup = client.post("/nomenclature/add", data={"article": "Дубль", "barcode": "2000000000011"}).text
+    assert "уже есть: Файловые брюки, размер M" in dup and 'value="Дубль"' in dup
+
+    page = client.get("/nomenclature", params={"q": "Ручная"}).text
+    row_id = int(re.search(r"edit=(\d+)", page).group(1))
+    edited = client.post(f"/nomenclature/{row_id}/edit", data={"category": "Юбки", "article": "Ручная юбка 2",
+                                                              "size": "M", "barcode": "2000000000028"},
+                         follow_redirects=True).text
+    assert "Строка изменена: Ручная юбка 2 M" in edited
+
+    upload([["Брюки", "Другие брюки", "L", "2000000000035"]], "f2.xlsx")
+    page = client.get("/nomenclature").text
+    assert "Файловые брюки" not in page and "Ручная юбка 2" in page and "Строк: 2" in page
+
+    upload([["Юбки", "Юбка из файла", "M", "2000000000028"]], "f3.xlsx")
+    page = client.get("/nomenclature").text
+    assert "Ручная юбка 2" not in page and "Юбка из файла" in page and "Строк: 1" in page

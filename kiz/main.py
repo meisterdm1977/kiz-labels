@@ -459,13 +459,43 @@ def upload_delete(request: Request, upload_id: int, password: str = Form("")):
 
 # ---------- nomenclature ----------
 
-@app.get("/nomenclature", response_class=HTMLResponse)
-def nomenclature_page(request: Request, q: str = "", category: str = ""):
-    require_admin(request)
+def _nomenclature_page(request, q="", category="", edit=None, form=None, error=None):
     with db.pool.connection() as conn:
         rows, categories, loaded = nomenclature.listing(conn, q, category)
+        editing = nomenclature.get_row(conn, edit) if edit else None
+    if editing and not editing["manual"]:
+        editing = None
+    extra = {"flash": {"text": error, "error": True}} if error else {}
     return render(request, "nomenclature.html", rows=rows, categories=categories, loaded=loaded,
-                  q=q, category=category)
+                  q=q, category=category, editing=editing, form=form or editing or {}, **extra)
+
+
+@app.get("/nomenclature", response_class=HTMLResponse)
+def nomenclature_page(request: Request, q: str = "", category: str = "", edit: int = 0):
+    require_admin(request)
+    return _nomenclature_page(request, q, category, edit or None)
+
+
+@app.post("/nomenclature/add", response_class=HTMLResponse)
+async def nomenclature_add(request: Request):
+    admin = require_admin(request)
+    form = dict(await request.form())
+    try:
+        item = nomenclature.save_manual(form, admin["name"])
+    except nomenclature.NomenclatureError as e:
+        return _nomenclature_page(request, form=form, error=str(e))
+    return redirect("/nomenclature", request, f"Добавлено вручную: {item['article']} {item['size']}".strip())
+
+
+@app.post("/nomenclature/{row_id}/edit", response_class=HTMLResponse)
+async def nomenclature_edit(request: Request, row_id: int):
+    admin = require_admin(request)
+    form = dict(await request.form())
+    try:
+        item = nomenclature.save_manual(form, admin["name"], row_id)
+    except nomenclature.NomenclatureError as e:
+        return _nomenclature_page(request, edit=row_id, form=form, error=str(e))
+    return redirect("/nomenclature", request, f"Строка изменена: {item['article']} {item['size']}".strip())
 
 
 @app.post("/nomenclature/upload")
@@ -478,7 +508,7 @@ async def nomenclature_upload(request: Request, file: UploadFile = File(...)):
     except nomenclature.NomenclatureError as e:
         return redirect("/nomenclature", request, str(e), error=True)
     nomenclature.replace(items, file.filename, admin["name"])
-    return redirect("/nomenclature", request, f"Номенклатура загружена: {len(items)} строк. Прежний список заменён.")
+    return redirect("/nomenclature", request, f"Номенклатура загружена: {len(items)} строк. Прежний список из файла заменён, строки «вручную» сохранены.")
 
 
 # ---------- stock and journal ----------

@@ -107,3 +107,6 @@ CREATE TABLE IF NOT EXISTS nomenclature (
     size      text NOT NULL DEFAULT '',
     barcode   text NOT NULL DEFAULT ''
 );
+-- Rows added by hand survive a file upload; a file row with the same barcode replaces them.
+ALTER TABLE nomenclature ADD COLUMN IF NOT EXISTS manual boolean NOT NULL DEFAULT false;
+ALTER TABLE nomenclature ADD COLUMN IF NOT EXISTS added_by text NOT NULL DEFAULT '';

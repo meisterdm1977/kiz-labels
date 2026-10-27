@@ -7,7 +7,19 @@
     <input type="file" name="file" accept=".xlsx" required>
   </label>
   <button class="primary">Загрузить файл</button>
-  <p class="muted">{% if loaded %}Сейчас загружено {{ loaded.count }} строк из файла «{{ loaded.file }}», {{ loaded.at|local }}{% if loaded.by %}, {{ loaded.by }}{% endif %}. {% endif %}Новый файл полностью заменяет прежний список.</p>
+  <p class="muted">{% if loaded %}Сейчас загружено {{ loaded.count }} строк из файла «{{ loaded.file }}», {{ loaded.at|local }}{% if loaded.by %}, {{ loaded.by }}{% endif %}. {% endif %}Новый файл заменяет строки из прежнего файла. Строки «вручную» остаются, если в новом файле нет такого же баркода.</p>
+</form>
+<form method="post" action="{{ '/nomenclature/%d/edit' % editing.id if editing else '/nomenclature/add' }}" class="card" id="manual">
+  <h2>{{ 'Изменить строку' if editing else 'Добавить вручную' }}</h2>
+  <div class="filters">
+    <label>Категория <input name="category" value="{{ form.category or '' }}" list="nom-categories" placeholder="Рубашки"></label>
+    <label>Артикул/цвет <input name="article" value="{{ form.article or '' }}" required></label>
+    <label>Размер <input name="size" value="{{ form.size or '' }}" size="6" placeholder="2XL"></label>
+    <label>Основной баркод <input name="barcode" value="{{ form.barcode or '' }}" required inputmode="numeric" class="mono"></label>
+    <button class="primary">{{ 'Сохранить' if editing else 'Добавить' }}</button>
+    {% if editing %}<a href="/nomenclature">Отмена</a>{% endif %}
+  </div>
+  <datalist id="nom-categories">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist>
 </form>
 <form method="get" action="/nomenclature" class="filters">
   <input name="q" value="{{ q }}" placeholder="Артикул, размер или баркод">
@@ -19,12 +31,13 @@
 </form>
 <p class="muted">Строк: {{ rows|length }}</p>
 <table class="list">
-  <thead><tr><th>Категория</th><th>Артикул/цвет</th><th>Размер</th><th>Основной баркод</th></tr></thead>
+  <thead><tr><th>Категория</th><th>Артикул/цвет</th><th>Размер</th><th>Основной баркод</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
-  <tr><td>{{ r.category }}</td><td>{{ r.article }}</td><td>{{ r.size }}</td><td class="mono">{{ r.barcode }}</td></tr>
+  <tr><td>{{ r.category }}</td><td>{{ r.article }}</td><td>{{ r.size }}</td><td class="mono">{{ r.barcode }}</td>
+    <td class="row-actions">{% if r.manual %}<span class="tag warn">вручную</span> <a href="/nomenclature?edit={{ r.id }}#manual">Изменить</a>{% endif %}</td></tr>
   {% else %}
-  <tr><td colspan="4" class="muted">{{ 'Ничего не найдено' if q or category else 'Номенклатура пока не загружена' }}</td></tr>
+  <tr><td colspan="5" class="muted">{{ 'Ничего не найдено' if q or category else 'Номенклатура пока не загружена' }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
