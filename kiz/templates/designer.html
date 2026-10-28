@@ -29,6 +29,7 @@
     <div class="designer-tools">
       <button type="button" class="primary" id="save">Сохранить</button>
       <button type="button" id="pdf">Открыть PDF</button>
+      <button type="button" id="clear">Очистить всё</button>
       <span id="state" class="muted"></span>
     </div>
     <form method="post" action="/designer/reset" onsubmit="return confirm('Вернуть исходный макет? Ваши изменения в этом макете пропадут.')">
@@ -268,6 +269,15 @@ document.getElementById("pdf").addEventListener("click", async () => {
   const r = await fetch("/designer/preview", {method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({kind: KIND, layout, sample: document.getElementById("sample").value, format: "pdf"})});
   if (r.ok) window.open(URL.createObjectURL(await r.blob()), "_blank");
+});
+
+document.getElementById("clear").addEventListener("click", () => {
+  if (!layout.length || !confirm("Убрать с наклейки все элементы? Печать изменится только после «Сохранить».")) return;
+  layout = [];
+  selected = null;
+  drawBoxes();
+  drawProps();
+  markDirty();
 });
 
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
