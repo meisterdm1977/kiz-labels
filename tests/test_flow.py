@@ -497,3 +497,32 @@ def test_sticker_designer_layout_is_used_for_printing(client):
     r = client.post("/pack/sticker", data={"code": "2039356100002"}, follow_redirects=True)
     token = re.search(r"/pack/sticker/([\w-]+)/pdf", r.text).group(1)
     assert "Спасибо" not in PdfReader(io.BytesIO(client.get(f"/pack/sticker/{token}/pdf").content)).pages[0].extract_text()
+
+
+def test_edit_employee_name_and_role(client):
+    login(client)
+    code = create_packer(client, "Петрова Мария")
+    with db.pool.connection() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE name = 'Петрова Мария'").fetchone()["id"]
+    page = client.post(f"/users/{uid}/edit", data={"name": "Сидорова Мария", "role": "packer"},
+                       follow_redirects=True).text
+    assert "Данные сотрудника сохранены" in page and "Сидорова Мария" in page
+    r = client.post("/pack/sticker", data={"code": code}, follow_redirects=True)
+    assert "Мария С" in r.text
+
+    assert "задайте пароль" in client.post(f"/users/{uid}/edit", data={"name": "Сидорова Мария", "role": "admin"},
+                                           follow_redirects=True).text
+    page = client.post(f"/users/{uid}/edit", data={"name": "Сидорова Мария", "role": "admin", "password": "maria-pass-1"},
+                       follow_redirects=True).text
+    assert "Администратор" in page
+    page = client.post(f"/users/{uid}/edit", data={"name": "Сидорова Мария", "role": "packer"},
+                       follow_redirects=True).text
+    assert "Данные сотрудника сохранены" in page
+    with db.pool.connection() as conn:
+        row = conn.execute("SELECT role, password_hash FROM users WHERE id = %s", (uid,)).fetchone()
+        me = conn.execute("SELECT id FROM users WHERE login = 'admin'").fetchone()["id"]
+    assert row["role"] == "packer" and row["password_hash"] is None
+    assert "самого себя" in client.post(f"/users/{me}/edit", data={"name": "Администратор", "role": "packer"},
+                                        follow_redirects=True).text
+    assert "Укажите имя" in client.post(f"/users/{uid}/edit", data={"name": " ", "role": "packer"},
+                                        follow_redirects=True).text

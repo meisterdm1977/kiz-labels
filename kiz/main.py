@@ -951,6 +951,43 @@ def toggle_user(request: Request, user_id: int, field: str = Form(...)):
     return redirect(card, request, "Сотрудник включён" if row and row["active"] else "Сотрудник отключён")
 
 
+@app.post("/users/{user_id}/edit")
+def edit_user(request: Request, user_id: int, name: str = Form(""), role: str = Form(...), password: str = Form("")):
+    current = require_admin(request)
+    card = f"/users/{user_id}"
+    name = name.strip()
+    if not name or role not in auth.ROLE_NAMES:
+        return redirect(card, request, "Укажите имя и роль", error=True)
+    try:
+        with db.tx() as conn:
+            person = conn.execute("SELECT * FROM users WHERE id = %s AND role IN ('admin', 'packer') FOR UPDATE",
+                                  (user_id,)).fetchone()
+            if not person:
+                return redirect("/users", request, "Сотрудник не найден", error=True)
+            password_hash = person["password_hash"]
+            if role == "admin" and person["role"] != "admin":
+                if len(password) < 8:
+                    return redirect(card, request, "Чтобы сделать администратором, задайте пароль не короче 8 символов",
+                                    error=True)
+                if _password_taken(conn, password, except_id=user_id):
+                    return redirect(card, request, "Такой пароль уже у другого администратора, придумайте другой",
+                                    error=True)
+                password_hash = auth.hash_password(password)
+            elif role == "packer" and person["role"] == "admin":
+                if user_id == current["id"]:
+                    return redirect(card, request, "Нельзя снять права администратора с самого себя", error=True)
+                others = conn.execute("SELECT count(*) AS n FROM users WHERE role = 'admin' AND active AND id <> %s",
+                                      (user_id,)).fetchone()["n"]
+                if not others:
+                    return redirect(card, request, "Это единственный администратор, его роль менять нельзя", error=True)
+                password_hash = None
+            conn.execute("UPDATE users SET name = %s, role = %s, password_hash = %s WHERE id = %s",
+                         (name, role, password_hash, user_id))
+    except UniqueViolation as e:
+        return redirect(card, request, _unique_error(e), error=True)
+    return redirect(card, request, "Данные сотрудника сохранены")
+
+
 @app.post("/users/{user_id}/password")
 def set_password(request: Request, user_id: int, password: str = Form(...)):
     require_admin(request)

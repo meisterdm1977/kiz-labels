@@ -18,6 +18,23 @@
     · <b>{{ 'работает' if person.active else 'отключён' }}</b></p>
 </div>
 
+<form method="post" action="/users/{{ person.id }}/edit" class="card">
+  <h2>Изменить данные</h2>
+  <label>Имя <input name="name" value="{{ person.name }}" required maxlength="100"></label>
+  <label>Роль
+    <select name="role" id="role">
+      {% for key, title in role_names.items() %}<option value="{{ key }}" {{ 'selected' if key == person.role }}>{{ title }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if person.role != 'admin' %}
+  <div id="login-fields">
+    <label>Пароль для входа администратора (не короче 8 символов)
+      <input name="password" type="password" minlength="8" autocomplete="new-password"></label>
+  </div>
+  {% endif %}
+  <button class="primary">Сохранить</button>
+</form>
+
 <div class="card">
   <h2>{{ 'Отключить' if person.active else 'Включить' }}</h2>
   <p class="muted">{{ 'Отключённый сотрудник не сможет печатать. Его история в журнале сохранится.' if person.active
@@ -45,3 +62,4 @@
 </form>
 {% endif %}
 {% endblock %}
+{% block scripts %}{% if person.role != 'admin' %}<script>toggleLoginFields();</script>{% endif %}{% endblock %}
