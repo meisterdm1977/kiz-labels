@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import logging
 import re
@@ -79,6 +80,9 @@ templates.env.globals["role_names"] = auth.ROLE_NAMES
 SIZES = {"50x104": (50, 104), "58x40": (58, 40)}
 DEFAULT_SIZE = "50x104"
 templates.env.globals["sizes"] = SIZES
+# Changes with app.css/app.js, so browsers fetch the new files after an update instead of a cached copy.
+templates.env.globals["static_version"] = hashlib.md5(
+    b"".join((HERE / "static" / f).read_bytes() for f in ("app.css", "app.js"))).hexdigest()[:10]
 
 
 def _size(value):

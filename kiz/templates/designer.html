@@ -82,6 +82,7 @@ function drawBoxes() {
     Object.assign(box.style, {left: el.x * S + "px", top: el.y * S + "px", width: el.w * S + "px", height: el.h * S + "px"});
     box.title = title(el);
     box.addEventListener("pointerdown", (e) => startDrag(e, el, false));
+    box.addEventListener("dblclick", () => { const f = props.querySelector("input, select"); if (f) { f.focus(); f.select && f.select(); } });
     if (el === selected) {
       const handle = document.createElement("div");
       handle.className = "handle";

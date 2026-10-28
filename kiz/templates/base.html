@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Этикетки ЧЗ{% endblock %}</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
 </head>
 <body>
 {% set sections = [
@@ -44,7 +44,7 @@
 </main>
 </div>
 </div>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ static_version }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
