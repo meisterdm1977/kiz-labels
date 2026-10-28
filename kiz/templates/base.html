@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Этикетки ЧЗ{% endblock %}</title>
+<title>{% block title %}Маркер{% endblock %}{% if self.title() != "Маркер" %} · Маркер{% endif %}</title>
+<link rel="icon" href="/static/logo.svg?v={{ static_version }}" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v={{ static_version }}">
 </head>
 <body>
@@ -13,12 +14,12 @@
   ("/journal", "Журнал", "journal"), ("/users", "Сотрудники", "people"),
   ("/devices", "Компьютеры", "computer")] if admin else [("/pack", "Печать", "print")] %}
 {% set path = request.url.path %}
-{% set current = namespace(title="Этикетки ЧЗ") %}
+{% set current = namespace(title="Маркер") %}
 {% for url, name, icon in sections %}{% if path.startswith(url) or (url == "/pack" and path.startswith("/jobs")) %}{% set current.title = name %}{% endif %}{% endfor %}
 <div class="app">
 {% if device %}
 <nav class="panel">
-  <a href="/pack" class="panel-brand">Этикетки ЧЗ</a>
+  <a href="/pack" class="panel-brand"><img src="/static/logo.svg?v={{ static_version }}" alt="" width="26" height="26">Маркер</a>
   {% for url, name, icon in sections %}
   <a href="{{ url }}" class="{{ 'on' if current.title == name }}">{% include "_icons.html" %}<span>{{ name }}</span></a>
   {% endfor %}

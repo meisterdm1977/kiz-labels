@@ -2,6 +2,7 @@
 {% block title %}Компьютер не допущен{% endblock %}
 {% block content %}
 <form method="post" action="/device" class="card narrow" data-once>
+  <div class="brand-big"><img src="/static/logo.svg?v={{ static_version }}" alt="" width="40" height="40">Маркер</div>
   <h1>Компьютер не допущен</h1>
   <p class="muted">Сайт открывается только на компьютерах, которые разрешил администратор.
     Чтобы разрешить этот компьютер, администратор вводит здесь свой пароль. Это нужно сделать один раз.</p>
