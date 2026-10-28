@@ -4,9 +4,9 @@
 <div class="pack-columns">
   <section>
     <h1 class="pack-title">Печатать КИЗ</h1>
-    <form method="get" action="/pack" class="search">
+    <form method="get" action="/pack" class="search pack-search">
       <div class="suggest grow">
-        <input name="q" id="product-search" value="{{ q }}" placeholder="Артикул и размер или отсканируйте баркод" {{ '' if focus == 'sticker' else 'autofocus' }} autocomplete="off" data-select>
+        <input name="q" id="product-search" title="Например: Шорты 02 коричневый 40" value="{{ q }}" placeholder="Артикул и размер или баркод" {{ '' if focus == 'sticker' else 'autofocus' }} autocomplete="off" data-select>
         <ul id="product-suggest" class="suggest-list" hidden></ul>
       </div>
       <button class="primary">Найти</button>
@@ -14,8 +14,8 @@
   </section>
   <section>
     <h1 class="pack-title">Печатать наклейку ШК</h1>
-    <form method="post" action="/pack/sticker" class="search">
-      <input name="code" placeholder="Баркод товара или личный код" {{ 'autofocus' if focus == 'sticker' }} autocomplete="off" data-select>
+    <form method="post" action="/pack/sticker" class="search pack-search">
+      <input name="code" title="Например, отсканируйте баркод товара или бейдж сотрудника" placeholder="Баркод товара или личный код" {{ 'autofocus' if focus == 'sticker' }} autocomplete="off" data-select>
       <button class="primary">Печать</button>
     </form>
   </section>
@@ -36,8 +36,6 @@
   {% else %}
   <p class="muted">Ничего не найдено по запросу «{{ q }}».</p>
   {% endif %}
-{% else %}
-<p class="muted">Введите артикул с размером, например «Шорты 02 коричневый 40», или отсканируйте баркод товара.</p>
 {% endif %}
 {% endblock %}
 {% block scripts %}<script>setupProductSearch();</script>{% endblock %}
